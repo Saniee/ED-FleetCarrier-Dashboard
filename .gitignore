@@ -1,0 +1,4 @@
+# Machine-local secrets and server-specific overrides.
+# .env.example / compose.override.example.yaml are the committed templates.
+.env
+compose.override.yaml

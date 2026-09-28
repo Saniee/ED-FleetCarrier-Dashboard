@@ -1,0 +1,20 @@
+[package]
+name = "backend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "*"
+chrono = "*"
+serde_json = "1.0.151"
+dotenvy = "0.15"
+futures-core = "0.3"
+tokio = { version = "*", features = ["full"] }
+serde = { version = "*", features = ["derive"] }
+sqlx = {version = "*", features = [
+    "runtime-tokio",
+    "postgres",
+    "chrono"
+] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+

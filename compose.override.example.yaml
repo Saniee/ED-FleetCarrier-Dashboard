@@ -1,0 +1,40 @@
+# compose.override.example.yaml
+#
+# EXAMPLE — not loaded while it keeps the `.example` suffix. Docker Compose
+# automatically merges `compose.override.yaml` (sitting next to `compose.yaml`)
+# on top of the base file, so to use this:
+#
+#   cp compose.override.example.yaml compose.override.yaml
+#   docker compose --profile prod up -d --build
+#
+# WHY THIS FILE EXISTS
+# The host ports in `compose.yaml` (8080 / 3000 / 5432) are the dev defaults and
+# are assumed free. On a busy server they are often already taken. When Compose
+# merges two files it *concatenates* list values such as `ports`, so a plain
+# entry here would ADD a second binding and the original clash would remain.
+# The `!override` tag replaces the base list instead. `!reset` clears it.
+# (Both require Compose v2.24+; this host runs v5.)
+#
+# WHEN YOU CHANGE HOST PORTS:
+#   * Caddy on the host must proxy to the new host ports — `/api/*` to the
+#     backend port and everything else to the frontend port. Update its config.
+#   * `PUBLIC_ORIGIN` (the public URL, e.g. https://your-domain.example) does NOT
+#     change; it describes the public entrypoint, not these loopback bindings.
+#   * Container ports stay as-is; only the left-hand side of `host:container`
+#     moves.
+
+services:
+  # In prod the backend reaches Postgres over the compose network as `db:5432`,
+  # so there is no reason to publish it. The base file only binds it for native
+  # `cargo run`; clearing it avoids a 5432 clash with anything else on the host.
+  # Delete this block if you still want the port published on the host.
+  db:
+    ports: !reset []
+
+  backend:
+    ports: !override
+      - "127.0.0.1:18080:8080"
+
+  frontend:
+    ports: !override
+      - "127.0.0.1:13000:3000"
