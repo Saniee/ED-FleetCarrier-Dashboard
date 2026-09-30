@@ -31,3 +31,23 @@ pub async fn insert(
 
     Ok(id)
 }
+
+pub async fn recent(
+    pool: &PgPool,
+    carrier_id: i64,
+    limit: i64
+) -> sqlx::Result<Vec<serde_json::Value>> {
+    sqlx::query_scalar(
+        "
+        SELECT to_jsonb(ce)
+        FROM carrier_events ce
+        WHERE ce.carrier = $1
+        ORDER BY ce.id DESC
+        LIMIT $2
+        "
+    )
+    .bind(carrier_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}

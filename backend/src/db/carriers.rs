@@ -387,6 +387,12 @@ async fn upsert_location(
             star_system = EXCLUDED.star_system,
             system_address = EXCLUDED.system_address,
             body_id = EXCLUDED.body_id,
+            -- The carrier has moved, so any scheduled jump is complete.
+            jump_destination_system = NULL,
+            jump_destination_system_address = NULL,
+            jump_destination_body = NULL,
+            jump_destination_body_id = NULL,
+            jump_departure_time = NULL,
             updated_at = now()
         RETURNING carrier_id
         ",
@@ -461,6 +467,12 @@ async fn apply_jump(pool: &PgPool, j: &CarrierJump) -> sqlx::Result<Option<i64>>
                     body_id = EXCLUDED.body_id,
                     body_type = EXCLUDED.body_type,
                     system_faction = EXCLUDED.system_faction,
+                    -- The carrier has moved, so any scheduled jump is complete.
+                    jump_destination_system = NULL,
+                    jump_destination_system_address = NULL,
+                    jump_destination_body = NULL,
+                    jump_destination_body_id = NULL,
+                    jump_departure_time = NULL,
                     updated_at = now()
                 RETURNING carrier_id
                 ",
@@ -515,7 +527,14 @@ async fn apply_jump(pool: &PgPool, j: &CarrierJump) -> sqlx::Result<Option<i64>>
                     system_government = $13, system_government_localised = $14,
                     system_security = $15, system_security_localised = $16,
                     population = $17, body = $18, body_id = $19, body_type = $20,
-                    system_faction = $21, updated_at = now()
+                    system_faction = $21,
+                    -- The carrier has moved, so any scheduled jump is complete.
+                    jump_destination_system = NULL,
+                    jump_destination_system_address = NULL,
+                    jump_destination_body = NULL,
+                    jump_destination_body_id = NULL,
+                    jump_departure_time = NULL,
+                    updated_at = now()
                 WHERE carrier_id = (
                     SELECT carrier_id FROM carriers
                     WHERE system_address = $1
@@ -569,15 +588,18 @@ async fn read_jsonb(
     // `column` is one of a fixed set of internal literals, never caller input,
     // so the dynamic SQL is safe to assert.
     let sql = format!("SELECT {column} FROM carriers WHERE carrier_id = $1");
-    let row: Option<Value> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+    // Decode as Option<Value>: a jsonb column is NULL until an event first sets
+    // it (e.g. `trade_orders` before any CarrierTradeOrder), and NULL must fall
+    // back to the default rather than failing to decode.
+    let row: Option<Option<Value>> = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
         .bind(carrier_id)
         .fetch_optional(pool)
         .await?;
 
     match row {
+        Some(Some(value)) => Ok((true, value)),
         // Row exists but the column is NULL.
-        Some(Value::Null) => Ok((true, default)),
-        Some(value) => Ok((true, value)),
+        Some(None) => Ok((true, default)),
         None => Ok((false, default)),
     }
 }

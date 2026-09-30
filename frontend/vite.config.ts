@@ -9,7 +9,9 @@ export default defineConfig({
 		// POST and the SSE stream.
 		proxy: {
 			'/api': {
-				target: 'http://localhost:8080',
+				// 127.0.0.1, not localhost: the backend binds IPv4 only, and
+				// Node resolves localhost to ::1 first, which stalls the connect.
+				target: 'http://127.0.0.1:8080',
 				changeOrigin: true
 			}
 		}
