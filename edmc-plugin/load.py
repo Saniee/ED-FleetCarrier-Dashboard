@@ -1,7 +1,7 @@
 """
-CarrierSync - EDMC plugin that forwards Fleet Carrier journal events to an HTTP endpoint.
+ed-commander - EDMC plugin that forwards Fleet Carrier journal events to an HTTP endpoint.
 
-Settings (EDMC > File > Settings > CarrierSync):
+Settings (EDMC > File > Settings > ed-commander):
   * API URL - base URL of the backend, e.g. http://127.0.0.1:8080
               (events are POSTed to <API URL>/api/carrier/event)
   * Token   - sent in the X-Ingest-Token header (omit to send no header)
@@ -24,19 +24,26 @@ from typing import Any, Optional
 import requests
 
 import myNotebook as nb  # type: ignore  # provided by EDMC
+import timeout_session  # type: ignore  # provided by EDMC
 from config import appname, config  # type: ignore  # provided by EDMC
 
 PLUGIN_NAME = "ed-commander"
-PLUGIN_VERSION = "1.0.0"
+__version__ = "1.0.1"
+
+# myNotebook doesn't export the same widgets in every EDMC version (6.1.2 has no
+# `Entry`, only `EntryMenu`), so fall back to the plain ttk widget rather than
+# letting an AttributeError take the whole settings tab down.
+_Entry = getattr(nb, "EntryMenu", None) or getattr(nb, "Entry", None) or ttk.Entry
+_Button = getattr(nb, "Button", None) or ttk.Button
 
 logger = logging.getLogger(f"{appname}.{os.path.basename(os.path.dirname(__file__))}")
 
 # --------------------------------------------------------------------------- #
 # Constants
 # --------------------------------------------------------------------------- #
-CFG_URL = "carriersync_url"
-CFG_TOKEN = "carriersync_token"
-CFG_ENABLED = "carriersync_enabled"
+CFG_URL = "edcommander_url"
+CFG_TOKEN = "edcommander_token"
+CFG_ENABLED = "edcommander_enabled"
 
 DEFAULT_URL = "http://127.0.0.1:8080"
 EVENT_PATH = "/api/carrier/event"
@@ -56,7 +63,7 @@ REQUEST_TIMEOUT = 10        # seconds
 BACKOFF_START = 2.0         # seconds
 BACKOFF_MAX = 120.0
 MAX_PENDING = 1000          # cap on queued events
-STATUS_EVENT = "<<CarrierSyncStatus>>"
+STATUS_EVENT = "<<EDCommanderStatus>>"
 
 
 # --------------------------------------------------------------------------- #
@@ -70,10 +77,15 @@ class Settings:
         self.enabled = True
 
     def load(self) -> None:
+        try:
+            url = normalise_url(config.get_str(CFG_URL, default=DEFAULT_URL) or DEFAULT_URL)
+            token = (config.get_str(CFG_TOKEN, default="") or "").strip()
+            enabled = config.get_bool(CFG_ENABLED, default=True)
+        except Exception:
+            logger.exception("Could not read settings; using defaults")
+            url, token, enabled = DEFAULT_URL, "", True
         with self._lock:
-            self.url = normalise_url(config.get_str(CFG_URL, default=DEFAULT_URL) or DEFAULT_URL)
-            self.token = (config.get_str(CFG_TOKEN, default="") or "").strip()
-            self.enabled = config.get_bool(CFG_ENABLED, default=True)
+            self.url, self.token, self.enabled = url, token, enabled
 
     def snapshot(self) -> tuple[str, str, bool]:
         with self._lock:
@@ -98,8 +110,7 @@ class Sender:
         self.q: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=MAX_PENDING)
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._session = requests.Session()
-        self._session.headers["User-Agent"] = f"EDMC-{PLUGIN_NAME}/{PLUGIN_VERSION}"
+        self._session = timeout_session.new_session()
         self._status_lock = threading.Lock()
         self._status = "idle"
         self.on_status_change: Optional[Any] = None  # called from worker thread
@@ -114,10 +125,11 @@ class Sender:
     def _set_status(self, text: str) -> None:
         with self._status_lock:
             self._status = text
-        if self.on_status_change:
+        cb = self.on_status_change
+        if cb and not config.shutting_down:  # property, not a function
             try:
-                self.on_status_change()
-            except Exception:  # UI may already be gone during shutdown
+                cb()
+            except (tk.TclError, RuntimeError):  # widget gone / Tk not running
                 pass
 
     # -- lifecycle ---------------------------------------------------------
@@ -127,6 +139,7 @@ class Sender:
         self._thread.start()
 
     def stop(self) -> None:
+        self.on_status_change = None  # no UI callbacks once we're shutting down
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=REQUEST_TIMEOUT + 2)
@@ -232,6 +245,11 @@ _url_var: Optional[tk.StringVar] = None
 _token_var: Optional[tk.StringVar] = None
 _enabled_var: Optional[tk.IntVar] = None
 _test_result: Optional[tk.StringVar] = None
+_prefs_frame: Optional[tk.Widget] = None
+_test_lock = threading.Lock()
+_test_running = False
+_test_outcome = ""
+TEST_EVENT = "<<EDCommanderTestDone>>"
 
 
 # --------------------------------------------------------------------------- #
@@ -242,7 +260,7 @@ def plugin_start3(plugin_dir: str) -> str:
     settings.load()
     sender = Sender(settings, os.path.join(plugin_dir, "pending.json"))
     sender.start()
-    logger.info("%s %s started", PLUGIN_NAME, PLUGIN_VERSION)
+    logger.info("%s %s started", PLUGIN_NAME, __version__)
     return PLUGIN_NAME
 
 
@@ -252,23 +270,22 @@ def plugin_stop() -> None:
     logger.info("%s stopped", PLUGIN_NAME)
 
 
-def plugin_app(parent: tk.Frame) -> tk.Widget:
-    """Small status line on the main EDMC window."""
+def plugin_app(parent: tk.Frame) -> tuple[tk.Label, tk.Label]:
+    """One-line status on the main EDMC window (label, value)."""
     global _status_label
-    frame = tk.Frame(parent)
-    tk.Label(frame, text=f"{PLUGIN_NAME}:").grid(row=0, column=0, sticky=tk.W)
-    _status_label = tk.Label(frame, text="idle", anchor=tk.W)
-    _status_label.grid(row=0, column=1, sticky=tk.W)
+    label = tk.Label(parent, text=f"{PLUGIN_NAME}:")
+    _status_label = tk.Label(parent, text="idle", anchor=tk.W)
 
     def refresh(_event: Any = None) -> None:
         if sender and _status_label:
             _status_label["text"] = sender.status
 
-    # Worker thread must not touch Tk directly; a virtual event is the safe hop.
-    frame.bind(STATUS_EVENT, refresh)
+    # Worker threads must not touch Tk; event_generate is the one allowed hop.
+    _status_label.bind(STATUS_EVENT, refresh)
     if sender:
-        sender.on_status_change = lambda: frame.event_generate(STATUS_EVENT, when="tail")
-    return frame
+        target = _status_label
+        sender.on_status_change = lambda: target.event_generate(STATUS_EVENT, when="tail")
+    return label, _status_label
 
 
 def journal_entry(cmdr: str, is_beta: bool, system: str, station: str,
@@ -283,7 +300,19 @@ def journal_entry(cmdr: str, is_beta: bool, system: str, station: str,
 # Settings UI
 # --------------------------------------------------------------------------- #
 def plugin_prefs(parent: nb.Notebook, cmdr: str, is_beta: bool) -> nb.Frame:
-    global _url_var, _token_var, _enabled_var, _test_result
+    try:
+        return _build_prefs(parent)
+    except Exception:
+        # EDMC drops the tab silently if this raises, so log it and show why.
+        logger.exception("Failed to build settings tab")
+        frame = nb.Frame(parent)
+        nb.Label(frame, text=f"{PLUGIN_NAME}: settings failed to load.\n"
+                             "See EDMarketConnector.log for details.").grid(padx=10, pady=10)
+        return frame
+
+
+def _build_prefs(parent: nb.Notebook) -> nb.Frame:
+    global _url_var, _token_var, _enabled_var, _test_result, _prefs_frame
     url, token, enabled = settings.snapshot()
     _url_var = tk.StringVar(value=url)
     _token_var = tk.StringVar(value=token)
@@ -291,22 +320,24 @@ def plugin_prefs(parent: nb.Notebook, cmdr: str, is_beta: bool) -> nb.Frame:
     _test_result = tk.StringVar(value="")
 
     frame = nb.Frame(parent)
+    _prefs_frame = frame
+    frame.bind(TEST_EVENT, _on_test_done)
     frame.columnconfigure(1, weight=1)
     pad = {"padx": 10, "pady": 4}
 
-    nb.Label(frame, text=f"{PLUGIN_NAME} {PLUGIN_VERSION}").grid(row=0, column=0, columnspan=2, sticky=tk.W, **pad)
+    nb.Label(frame, text=f"{PLUGIN_NAME} {__version__}").grid(row=0, column=0, columnspan=2, sticky=tk.W, **pad)
     ttk.Separator(frame, orient=tk.HORIZONTAL).grid(row=1, column=0, columnspan=2, sticky=tk.EW, padx=10, pady=4)
 
     nb.Checkbutton(frame, text="Send carrier events", variable=_enabled_var).grid(
         row=2, column=0, columnspan=2, sticky=tk.W, **pad)
 
     nb.Label(frame, text="API URL").grid(row=3, column=0, sticky=tk.W, **pad)
-    nb.Entry(frame, textvariable=_url_var).grid(row=3, column=1, sticky=tk.EW, **pad)
+    _Entry(frame, textvariable=_url_var).grid(row=3, column=1, sticky=tk.EW, **pad)
 
     nb.Label(frame, text="Token").grid(row=4, column=0, sticky=tk.W, **pad)
-    nb.Entry(frame, textvariable=_token_var, show="*").grid(row=4, column=1, sticky=tk.EW, **pad)
+    _Entry(frame, textvariable=_token_var, show="*").grid(row=4, column=1, sticky=tk.EW, **pad)
 
-    nb.Button(frame, text="Test connection", command=_run_test).grid(row=5, column=0, sticky=tk.W, **pad)
+    _Button(frame, text="Test connection", command=_run_test).grid(row=5, column=0, sticky=tk.W, **pad)
     nb.Label(frame, textvariable=_test_result).grid(row=5, column=1, sticky=tk.W, **pad)
 
     nb.Label(frame, text=f"Events are POSTed to <API URL>{EVENT_PATH}\n"
@@ -325,29 +356,61 @@ def prefs_changed(cmdr: str, is_beta: bool) -> None:
 
 
 def _run_test() -> None:
-    """Check reachability (healthz), then the token by POSTing an invalid body.
-
-    A bad token should be answered 401/403; a valid one gets past auth and is
-    rejected for the empty body (400/422), so nothing is ever stored.
-    """
+    """Button handler (main thread): read the widgets, then test off-thread."""
+    global _test_running
     if _url_var is None or _token_var is None or _test_result is None:
         return
-    base = normalise_url(_url_var.get())
-    token = _token_var.get().strip()
+    with _test_lock:
+        if _test_running:
+            return
+        _test_running = True
+    _test_result.set("Testing...")
+    threading.Thread(
+        target=_test_worker,
+        args=(normalise_url(_url_var.get()), _token_var.get().strip()),
+        name=f"{PLUGIN_NAME}-test",
+        daemon=True,
+    ).start()
+
+
+def _test_worker(base: str, token: str) -> None:
+    """Runs in a thread - no Tk access except the final event_generate.
+
+    Checks reachability (healthz), then the token by POSTing an invalid body:
+    a bad token should be answered 401/403, a valid one gets past auth and is
+    rejected for the empty body (400/422), so nothing is ever stored.
+    """
+    global _test_running, _test_outcome
     headers = {TOKEN_HEADER: token} if token else {}
     try:
         h = requests.get(base + HEALTH_PATH, timeout=5)
         if not h.ok:
-            _test_result.set(f"Server reachable but healthz returned {h.status_code}")
-            return
-        r = requests.post(base + EVENT_PATH, json={}, headers=headers, timeout=5)
+            outcome = f"Server reachable but healthz returned {h.status_code}"
+        else:
+            r = requests.post(base + EVENT_PATH, json={}, headers=headers, timeout=5)
+            if r.status_code in (401, 403):
+                outcome = "Server OK, but token was rejected"
+            elif r.status_code in (400, 415, 422):
+                outcome = "OK - server reachable, token accepted"
+            else:
+                outcome = f"Server reachable (event endpoint returned {r.status_code})"
     except requests.RequestException as e:
-        _test_result.set(f"Failed: {type(e).__name__}")
-        return
+        outcome = f"Failed: {type(e).__name__}"
 
-    if r.status_code in (401, 403):
-        _test_result.set("Server OK, but token was rejected")
-    elif r.status_code in (400, 415, 422):
-        _test_result.set("OK - server reachable, token accepted")
-    else:
-        _test_result.set(f"Server reachable (event endpoint returned {r.status_code})")
+    with _test_lock:
+        _test_outcome = outcome
+        _test_running = False
+
+    target = _prefs_frame
+    if target is not None and not config.shutting_down:
+        try:
+            target.event_generate(TEST_EVENT, when="tail")
+        except (tk.TclError, RuntimeError):  # settings window closed / Tk not running
+            pass
+
+
+def _on_test_done(_event: Any = None) -> None:
+    """Main thread: show the result."""
+    if _test_result is not None:
+        with _test_lock:
+            _test_result.set(_test_outcome)
