@@ -7,14 +7,25 @@
 }
 
 :root {
-    --color-bg: rgb(0, 0, 0);
-    --color-text: rgb(255, 255, 255);
+  --color-bg: rgb(0, 0, 0);
 
-    /* Hlavní barva, kterou můžete měnit přes skript */
-    --color-primary: rgb(255, 0, 0);
-    --color-primary-0: color-mix(in srgb, var(--color-primary) 10%, black);
-    --color-primary-2: color-mix(in srgb, var(--color-primary) 30%, black);
-    --color-primary-5: color-mix(in srgb, var(--color-primary) 80%, black);
+  --color-text-dangerous: rgb(255, 255, 255);
+  --color-primary-dangerous: rgb(255, 0, 0);
+  --color-text-alien: #42ef3c;
+  --color-primary-alien: #25b820;
+
+  --color-text: var(--color-text-dangerous);
+  --color-primary: var(--color-primary-dangerous);
+
+  /* Hlavní barva, kterou můžete měnit přes skript */
+  --color-primary-0: color-mix(in srgb, var(--color-primary) 10%, black);
+  --color-primary-2: color-mix(in srgb, var(--color-primary) 30%, black);
+  --color-primary-5: color-mix(in srgb, var(--color-primary) 80%, black);
+}
+
+[data-theme="alien"] {
+  --color-text: var(--color-text-alien);
+  --color-primary: var(--color-primary-alien);
 }
 
 body {
@@ -157,9 +168,26 @@ body {
   }
 
   /* ---------- carrier header ---------- */
-
-  .carrier_info h1 {
+  .carrier_header {
     margin-bottom: 1rem;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+    button {
+      padding: 0.3rem 0.8rem;
+      background: var(--color-primary-0);
+      color: var(--color-text);
+      border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+      font-size: 0.7rem;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    h1 {
+      margin: 0;
+    }
   }
 
   .carrier_info .callsign {
@@ -274,50 +302,59 @@ body {
       opacity: 0.4;
     }
   }
-
-  /* Long logs scroll instead of stretching the page. */
   .table-wrap {
     max-height: 58vh;
     overflow-y: auto;
     border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 20%, transparent);
+    scrollbar-color: var(--color-primary) var(--color-primary-0);
+    scrollbar-width: thin;
+    &:hover {
+      scrollbar-width: auto;
+    }
+    &::-webkit-scrollbar {
+      width: 6px;
+      transition: width 0.2s ease;
+    }
+    &::-webkit-scrollbar-track {
+      background: var(--color-primary-0);
+    }
+    &::-webkit-scrollbar-thumb {
+      background: var(--color-primary);
+      border-radius: 4px;
+    }
+    &:hover::-webkit-scrollbar {
+      width: 12px;
+    }
   }
-
   .carrier_history table {
     margin-top: 0;
     table-layout: fixed;
   }
-
   .carrier_history thead th {
     position: sticky;
     top: 0;
     z-index: 1;
   }
-
   .carrier_history th:nth-child(1),
   .carrier_history td:nth-child(1) {
     width: 12rem;
   }
-
   .carrier_history th:nth-child(2),
   .carrier_history td:nth-child(2) {
     width: 15rem;
   }
-
   .carrier_history td {
     vertical-align: top;
     letter-spacing: 1px;
   }
-
   /* Dates line up column-wise. */
   .carrier_history td:nth-child(1) {
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
-
   .carrier_history tbody tr:nth-child(even) {
     background: color-mix(in srgb, var(--color-primary) 6%, transparent);
   }
-
   .muted {
     opacity: 0.6;
   }

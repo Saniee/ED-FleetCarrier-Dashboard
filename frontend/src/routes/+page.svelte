@@ -54,15 +54,33 @@
     feed.start();
     return () => feed.stop();
   });
+  let isAlien = $state(false);
+  function toggleTheme() {
+    isAlien = !isAlien;
+
+    if (isAlien) {
+      document.documentElement.setAttribute('data-theme', 'alien');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }
 </script>
+<svelte:head>
+  <title>ED Commander</title>
+</svelte:head>
 
 <div class="carrier-page">
+
+
   <div class="carrier_info">
     {#if feed.carrier}
-      <h1>
+      <header class="carrier_header">
+        <h1>
         {feed.carrier.name ?? 'unknown carrier'}
         <span class="callsign">{feed.carrier.callsign ?? '—'}</span>
       </h1>
+      <button onclick={toggleTheme}>Switch to {isAlien ? 'Dangerous' : 'Alien'}</button>
+    </header>
       <div class="stats">
         <div class="stat">
           <span class="stat__label">Fuel</span>
