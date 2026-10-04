@@ -6,6 +6,7 @@ mod db;
 mod routes;
 mod journal_definitions;
 mod app_state;
+mod edsm;
 
 #[tokio::main]
 async fn main() {
@@ -20,6 +21,7 @@ async fn main() {
 
     let state = app_state::AppState {
         db_pool: pool,
+        http: edsm::client(),
         tx
     };
 

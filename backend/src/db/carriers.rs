@@ -73,6 +73,27 @@ pub async fn get_current(pool: &PgPool) -> sqlx::Result<Option<CarrierSnapshot>>
         .await
 }
 
+/// Make sure a `carriers` row exists for `carrier_id`, creating a bare one if not.
+///
+/// A carrier's market can be the first thing we ever see for it, and
+/// `carrier_markets.carrier_id` is a foreign key onto `carriers`, so the row has
+/// to exist before a market can be stored. `DO NOTHING` leaves a carrier that
+/// already has a full row from CarrierBuy / CarrierStats untouched.
+pub async fn ensure(pool: &PgPool, carrier_id: i64) -> sqlx::Result<()> {
+    sqlx::query(
+        "
+        INSERT INTO carriers (carrier_id, updated_at)
+        VALUES ($1, now())
+        ON CONFLICT (carrier_id) DO NOTHING
+        ",
+    )
+    .bind(carrier_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Identity / purchase / name
 // ---------------------------------------------------------------------------
@@ -387,6 +408,14 @@ async fn upsert_location(
             star_system = EXCLUDED.star_system,
             system_address = EXCLUDED.system_address,
             body_id = EXCLUDED.body_id,
+            -- A location reports only a BodyID, never a name, so a name left over
+            -- from an earlier jump would belong to a different body. Blank it and
+            -- let the caller resolve the new one from the cache or EDSM. The CASE
+            -- reads the pre-update row, so it compares old against new.
+            body = CASE WHEN carriers.body_id IS DISTINCT FROM EXCLUDED.body_id
+                        THEN NULL ELSE carriers.body END,
+            body_type = CASE WHEN carriers.body_id IS DISTINCT FROM EXCLUDED.body_id
+                             THEN NULL ELSE carriers.body_type END,
             -- The carrier has moved, so any scheduled jump is complete.
             jump_destination_system = NULL,
             jump_destination_system_address = NULL,
@@ -403,6 +432,28 @@ async fn upsert_location(
     .bind(e.body_id)
     .fetch_one(pool)
     .await
+}
+
+/// Set the resolved body name for a carrier, or clear it when the name could not
+/// be resolved.
+///
+/// Kept separate from `upsert_location` because the name comes from a lookup
+/// rather than the event. `updated_at` is deliberately left alone: this is a
+/// detail filled in behind an event, not an event of its own.
+pub async fn set_body(
+    pool: &PgPool,
+    carrier_id: i64,
+    name: Option<&str>,
+    body_type: Option<&str>,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE carriers SET body = $2, body_type = $3 WHERE carrier_id = $1")
+        .bind(carrier_id)
+        .bind(name)
+        .bind(body_type)
+        .execute(pool)
+        .await?;
+
+    Ok(())
 }
 
 /// `CarrierJump` arrives in two shapes:

@@ -5,6 +5,7 @@
   import { eventSummary } from '$lib/carrier-summary';
   import { formatTimestamp, formatNumber, formatCountdown, parseTimestamp } from '$lib/format';
   import { fuelPerJump, jumpsLeft, MAX_JUMP_RANGE } from '$lib/carrier-fuel';
+  import { commodityName, commodityCategory, commodityPrice, commodityQuantity, isTraded } from '$lib/commodity';
 
   let { data }: { data: PageData } = $props();
 
@@ -39,6 +40,16 @@
     const perJump = fuelPerJump(MAX_JUMP_RANGE, capacityUsed, c.fuel_level);
 
     return { perJump, left: jumpsLeft(c.fuel_level, perJump) };
+  });
+
+  // A carrier's orders stay in `Market.json` after the quantity behind them runs
+  // out, so the file can list a commodity that is not actually being traded. The
+  // in-game market hides those, and so does this.
+  const market = $derived.by(() => {
+    const snapshot = feed.market;
+    if (!snapshot) return null;
+
+    return { event: snapshot.event, listed: snapshot.commodities.filter(isTraded) };
   });
 
   // Run the clock only while something is counting down. `now` is written but
@@ -95,6 +106,9 @@
         <div class="stat">
           <span class="stat__label">Current system</span>
           <span class="stat__value">{feed.carrier.star_system ?? '—'}</span>
+          {#if feed.carrier.body}
+            <span class="stat__hint">{feed.carrier.body}</span>
+          {/if}
         </div>
       </div>
     {:else}
@@ -115,6 +129,57 @@
       {/if}
     {:else}
       <p class="jump">Stationary</p>
+    {/if}
+  </div>
+
+  <div class="carrier_market">
+    <div class="history__head">
+      <h2>Commodities</h2>
+      {#if market}
+        <span class="status status--online">
+          {formatNumber(market.listed.length)} listed
+        </span>
+      {/if}
+    </div>
+
+    {#if market}
+      <p class="market__meta">
+        {market.event.station_name ?? '—'} · {market.event.star_system ?? '—'} · read
+        {formatTimestamp(market.event.timestamp ?? market.event.updated_at)}
+      </p>
+
+      {#if market.listed.length > 0}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Commodity</th>
+                <th>Category</th>
+                <th class="num" title="What a visitor pays to buy this from the carrier — the carrier's export">Sells</th>
+                <th class="num" title="What the carrier pays to buy this from a visitor — the carrier's import">Buys</th>
+                <th class="num">Stock</th>
+                <th class="num">Demand</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each market.listed as item (item.commodity_id)}
+                <tr>
+                  <td>{commodityName(item)}</td>
+                  <td>{commodityCategory(item)}</td>
+                  <td class="num">{commodityPrice(item.buy_price)}</td>
+                  <td class="num">{commodityPrice(item.sell_price)}</td>
+                  <td class="num">{commodityQuantity(item.stock)}</td>
+                  <td class="num">{commodityQuantity(item.demand)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {:else}
+        <p class="muted">Nothing listed on the market.</p>
+      {/if}
+    {:else}
+      <p class="muted">No market data yet — open the carrier's market in game.</p>
     {/if}
   </div>
 

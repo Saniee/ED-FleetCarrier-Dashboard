@@ -1,6 +1,7 @@
 mod carrier;
 mod carrier_event;
 mod carrier_stream;
+mod market;
 mod recent_events;
 mod healthz;
 
@@ -13,7 +14,9 @@ pub fn router(app: AppState) -> Router {
         .route("/api/carrier", get(carrier::get_current))
         .route("/api/carrier/{carrier_id}", get(carrier::get_by_id))
         .route("/api/carrier/{carrier_id}/events", get(recent_events::get_events))
+        .route("/api/carrier/{carrier_id}/market", get(market::get_by_carrier))
         .route("/api/carrier/event", post(carrier_event::post))
+        .route("/api/market/event", post(market::post))
         .route("/api/carrier/stream", get(carrier_stream::stream));
 
     Router::new()

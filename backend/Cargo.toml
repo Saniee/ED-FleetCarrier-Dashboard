@@ -17,4 +17,10 @@ sqlx = {version = "*", features = [
     "chrono"
 ] }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
+# rustls rather than native-tls so there is no OpenSSL to find on Windows.
+# Only used for the EDSM body-name lookup.
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "json"
+] }
 

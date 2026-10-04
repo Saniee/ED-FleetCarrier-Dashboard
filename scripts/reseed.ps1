@@ -5,9 +5,12 @@
   watched live.
 
 .DESCRIPTION
-  Truncates `carriers` and `carrier_events` (history cascades), then POSTs every
-  carrier event from the journal in chronological order. Events are paced so the
-  UI visibly steps through them.
+  Truncates `carriers` and `carrier_events` (history, markets and commodities
+  cascade), then POSTs every carrier event from the journal in chronological
+  order. Events are paced so the UI visibly steps through them.
+
+  After the replay the current Market.json is POSTed too, so the commodities
+  table has something in it. Pass -SkipMarket to leave the market alone.
 
   The backend must be running. The database is truncated through the compose
   service, so Docker must be up too.
@@ -36,6 +39,9 @@
 .PARAMETER SkipTruncate
   Append to the existing data instead of wiping it first.
 
+.PARAMETER SkipMarket
+  Do not replay Market.json after the carrier events.
+
 .EXAMPLE
   ./scripts/reseed.ps1
 .EXAMPLE
@@ -56,6 +62,7 @@ param(
 	[int]$Limit = 0,
 	[switch]$Loop,
 	[switch]$SkipTruncate,
+	[switch]$SkipMarket,
 	[string]$DbService = 'db',
 	[string]$DbUser = 'ed',
 	[string]$DbName = 'ed_commander'
@@ -156,6 +163,45 @@ function Invoke-Replay {
 	return ($fail -eq 0)
 }
 
+function Send-Market {
+	if ($SkipMarket) { return }
+
+	$path = Join-Path $JournalDir 'Market.json'
+	if (-not (Test-Path $path)) {
+		Write-Host '  no Market.json to replay' -ForegroundColor DarkGray
+		return
+	}
+
+	$json = [System.IO.File]::ReadAllText($path)
+	try {
+		$market = $json | ConvertFrom-Json
+	} catch {
+		Write-Host "  Market.json is not valid JSON: $_" -ForegroundColor Red
+		return
+	}
+
+	if ($market.StationType -ne 'FleetCarrier') {
+		Write-Host "  Market.json is for '$($market.StationType)' - not a fleet carrier, skipping" -ForegroundColor DarkGray
+		return
+	}
+
+	$client = [System.Net.Http.HttpClient]::new()
+	$content = [System.Net.Http.StringContent]::new($json, [System.Text.Encoding]::UTF8, 'application/json')
+	try {
+		$res = $client.PostAsync("$Url/api/market/event", $content).GetAwaiter().GetResult()
+		if ($res.IsSuccessStatusCode) {
+			$count = @($market.Items).Count
+			Write-Host ("  market {0} ({1}) -> {2} commodities" -f $market.StationName, $market.MarketID, $count) -ForegroundColor Green
+		} else {
+			$body = $res.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+			Write-Host ("  market -> HTTP {0}: {1}" -f [int]$res.StatusCode, $body) -ForegroundColor Red
+		}
+	} finally {
+		$content.Dispose()
+		$client.Dispose()
+	}
+}
+
 # ---------------------------------------------------------------------------
 
 Assert-Api
@@ -171,6 +217,7 @@ do {
 
 	if (-not $SkipTruncate) { Reset-Database }
 	$clean = Invoke-Replay -Events $events -DelayMs $DelayMs -DelayMax $DelayMax -Limit $Limit
+	Send-Market
 
 	if ($SkipTruncate) { break }
 	if ($Limit -gt 0) {

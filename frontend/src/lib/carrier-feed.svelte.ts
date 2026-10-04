@@ -1,4 +1,5 @@
 import type { Carrier, CarrierEventRow } from './types/carrier';
+import type { MarketSnapshot } from './types/market';
 
 /** Connection state as shown in the status badge. */
 export type CarrierStatus = 'connecting' | 'connected' | 'OFFLINE';
@@ -29,6 +30,7 @@ export const HISTORY_LIMIT = 20;
 export function createCarrierFeed(initial: Carrier | null) {
 	let carrier = $state<Carrier | null>(initial);
 	let events = $state<CarrierEventRow[] | null>(null);
+	let market = $state<MarketSnapshot | null>(null);
 	let status = $state<CarrierStatus>('connecting');
 
 	let source: EventSource | undefined;
@@ -63,6 +65,13 @@ export function createCarrierFeed(initial: Carrier | null) {
 			const next = JSON.parse((e as MessageEvent).data) as Carrier;
 			carrier = next;
 			void loadHistory(next.carrier_id);
+		});
+
+		// The market arrives whole — header plus commodities — on the same
+		// connection, both when a Market event is ingested and on subscribe, so
+		// there is no separate fetch to keep in step.
+		source.addEventListener('market', (e) => {
+			market = JSON.parse((e as MessageEvent).data) as MarketSnapshot;
 		});
 
 		source.onerror = () => {
@@ -148,6 +157,9 @@ export function createCarrierFeed(initial: Carrier | null) {
 		},
 		get events() {
 			return events;
+		},
+		get market() {
+			return market;
 		},
 		get status() {
 			return status;

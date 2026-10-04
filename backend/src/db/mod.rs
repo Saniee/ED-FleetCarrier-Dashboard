@@ -1,5 +1,8 @@
 pub mod log_event;
 pub mod carriers;
+pub mod market;
+pub mod commodities;
+pub mod body_names;
 
 use sqlx::PgPool;
 

@@ -1,9 +1,13 @@
 """
-ed-commander - EDMC plugin that forwards Fleet Carrier journal events to an HTTP endpoint.
+ed-commander - EDMC plugin that forwards Fleet Carrier data to an HTTP endpoint.
+
+  * Carrier journal events  -> POST <API URL>/api/carrier/event
+  * The carrier's market    -> POST <API URL>/api/market/event
+    (the journal's `Market` line has no commodity list, so the plugin merges in
+    the `Items` from Market.json before sending)
 
 Settings (EDMC > File > Settings > ed-commander):
   * API URL - base URL of the backend, e.g. http://127.0.0.1:8080
-              (events are POSTed to <API URL>/api/carrier/event)
   * Token   - sent in the X-Ingest-Token header (omit to send no header)
 
 Events are queued and sent from a background thread, so a slow or offline
@@ -18,6 +22,7 @@ import os
 import queue
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
 from typing import Any, Optional
 
@@ -27,8 +32,13 @@ import myNotebook as nb  # type: ignore  # provided by EDMC
 import timeout_session  # type: ignore  # provided by EDMC
 from config import appname, config  # type: ignore  # provided by EDMC
 
+try:
+    from monitor import monitor  # type: ignore  # provided by EDMC
+except ImportError:  # keep the plugin loadable if EDMC moves it
+    monitor = None
+
 PLUGIN_NAME = "ed-commander"
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 
 # myNotebook doesn't export the same widgets in every EDMC version (6.1.2 has no
 # `Entry`, only `EntryMenu`), so fall back to the plain ttk widget rather than
@@ -47,6 +57,7 @@ CFG_ENABLED = "edcommander_enabled"
 
 DEFAULT_URL = "http://127.0.0.1:8080"
 EVENT_PATH = "/api/carrier/event"
+MARKET_PATH = "/api/market/event"
 HEALTH_PATH = "/api/healthz"
 TOKEN_HEADER = "X-Ingest-Token"
 
@@ -58,6 +69,14 @@ CARRIER_EVENTS = frozenset({
     "CarrierModulePack", "CarrierTradeOrder", "CarrierDockingPermission",
     "CarrierNameChange", "CarrierLocation",
 })
+
+# The backend only tracks the carrier's own market and accepts-and-drops the
+# rest, so by default we don't send (or read Market.json for) station markets.
+# Set to False to forward every market the commander opens.
+ONLY_CARRIER_MARKETS = True
+FLEET_CARRIER_STATION_TYPE = "FleetCarrier"
+MARKET_READ_ATTEMPTS = 6    # Market.json may lag the journal line slightly
+MARKET_READ_DELAY = 0.5     # seconds between attempts
 
 REQUEST_TIMEOUT = 10        # seconds
 BACKOFF_START = 2.0         # seconds
@@ -95,8 +114,9 @@ class Settings:
 def normalise_url(raw: str) -> str:
     """Accept either a base URL or the full endpoint; return the base URL."""
     url = raw.strip().rstrip("/")
-    if url.endswith(EVENT_PATH):
-        url = url[: -len(EVENT_PATH)]
+    for path in (EVENT_PATH, MARKET_PATH):
+        if url.endswith(path):
+            url = url[: -len(path)]
     return url
 
 
@@ -107,6 +127,7 @@ class Sender:
     def __init__(self, settings: Settings, pending_file: str) -> None:
         self.settings = settings
         self.pending_file = pending_file
+        # Each job is {"path": <endpoint path>, "body": <JSON payload>}.
         self.q: "queue.Queue[dict[str, Any]]" = queue.Queue(maxsize=MAX_PENDING)
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -145,13 +166,48 @@ class Sender:
             self._thread.join(timeout=REQUEST_TIMEOUT + 2)
         self._save_pending()
 
-    def submit(self, entry: dict[str, Any]) -> None:
+    def submit(self, path: str, body: dict[str, Any]) -> None:
         try:
-            self.q.put_nowait(entry)
+            self.q.put_nowait({"path": path, "body": body})
         except queue.Full:
-            logger.warning("Queue full (%d); dropping %s", MAX_PENDING, entry.get("event"))
+            logger.warning("Queue full (%d); dropping %s", MAX_PENDING, body.get("event"))
             return
         self._set_status(f"queued ({self.q.qsize()})")
+
+    def submit_market(self, entry: dict[str, Any], journal_dir: Optional[str]) -> None:
+        """Queue a Market event once its commodity list has been merged in."""
+        threading.Thread(target=self._resolve_market, args=(entry, journal_dir),
+                         name=f"{PLUGIN_NAME}-market", daemon=True).start()
+
+    def _resolve_market(self, entry: dict[str, Any], journal_dir: Optional[str]) -> None:
+        """The journal line carries only the header; Market.json adds `Items`.
+
+        Runs off the main thread. Market.json is overwritten whenever any market
+        is opened, so only use it if it is for this MarketID and not older than
+        the journal line. An empty `Items` list is valid (a carrier with no
+        orders) and must still be sent so the stored market is cleared.
+        """
+        if not journal_dir:
+            logger.warning("Journal folder unknown; cannot read Market.json")
+            return
+        path = Path(journal_dir) / "Market.json"
+        for _ in range(MARKET_READ_ATTEMPTS):
+            try:
+                with path.open("rb") as f:
+                    data = json.load(f)
+            except (OSError, ValueError):  # not there yet / half-written
+                data = None
+            if (isinstance(data, dict)
+                    and data.get("MarketID") == entry.get("MarketID")
+                    and str(data.get("timestamp", "")) >= str(entry.get("timestamp", ""))):
+                body = {**entry, **data}  # Market.json repeats the header and adds Items
+                body["Items"] = data.get("Items") or []
+                self.submit(MARKET_PATH, body)
+                return
+            if self._stop.wait(MARKET_READ_DELAY):
+                return
+        logger.warning("Market.json never matched MarketID %s; skipping this market", entry.get("MarketID"))
+        self._set_status("market: Market.json not ready")
 
     # -- persistence -------------------------------------------------------
     def _load_pending(self) -> None:
@@ -159,6 +215,8 @@ class Sender:
             with open(self.pending_file, encoding="utf-8") as f:
                 items = json.load(f)
             for item in items[:MAX_PENDING]:
+                if "path" not in item:  # saved by v1.0.x: a bare carrier event
+                    item = {"path": EVENT_PATH, "body": item}
                 self.q.put_nowait(item)
             if items:
                 logger.info("Restored %d pending event(s)", len(items))
@@ -208,7 +266,7 @@ class Sender:
                 backoff = BACKOFF_START
                 self._set_status("ok" if self.q.empty() else f"sending ({self.q.qsize()} left)")
             elif outcome == "drop":
-                logger.error("Server rejected %s (%s); dropping", self._in_flight.get("event"), detail)
+                logger.error("Server rejected %s (%s); dropping", self._in_flight["body"].get("event"), detail)
                 self._in_flight = None
                 self._set_status(f"rejected: {detail}")
             else:  # "retry" - network error, 5xx, or auth problem the user can fix
@@ -216,10 +274,11 @@ class Sender:
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, BACKOFF_MAX)
 
-    def _post(self, base_url: str, token: str, entry: dict[str, Any]) -> tuple[str, str]:
+    def _post(self, base_url: str, token: str, job: dict[str, Any]) -> tuple[str, str]:
         headers = {TOKEN_HEADER: token} if token else {}
         try:
-            r = self._session.post(base_url + EVENT_PATH, json=entry, headers=headers, timeout=REQUEST_TIMEOUT)
+            r = self._session.post(base_url + job["path"], json=job["body"], headers=headers,
+                                   timeout=REQUEST_TIMEOUT)
         except requests.RequestException as e:
             logger.warning("POST failed: %s", e)
             return "retry", "offline"
@@ -292,8 +351,24 @@ def journal_entry(cmdr: str, is_beta: bool, system: str, station: str,
                   entry: dict[str, Any], state: dict[str, Any]) -> None:
     if is_beta or sender is None:
         return  # don't mix beta-game data into live carrier state
-    if entry.get("event") in CARRIER_EVENTS:
-        sender.submit(dict(entry))
+    event = entry.get("event")
+    if event in CARRIER_EVENTS:
+        sender.submit(EVENT_PATH, dict(entry))
+    elif event == "Market":
+        if ONLY_CARRIER_MARKETS and entry.get("StationType") != FLEET_CARRIER_STATION_TYPE:
+            return
+        sender.submit_market(dict(entry), _journal_dir())
+
+
+def _journal_dir() -> Optional[str]:
+    """The journal folder EDMC is watching (where Market.json is written)."""
+    try:
+        d = getattr(monitor, "currentdir", None) if monitor else None
+        d = d or config.get_str("journaldir") or getattr(config, "default_journal_dir", None)
+    except Exception:
+        logger.exception("Could not determine journal folder")
+        return None
+    return str(d) if d else None
 
 
 # --------------------------------------------------------------------------- #
@@ -340,7 +415,8 @@ def _build_prefs(parent: nb.Notebook) -> nb.Frame:
     _Button(frame, text="Test connection", command=_run_test).grid(row=5, column=0, sticky=tk.W, **pad)
     nb.Label(frame, textvariable=_test_result).grid(row=5, column=1, sticky=tk.W, **pad)
 
-    nb.Label(frame, text=f"Events are POSTed to <API URL>{EVENT_PATH}\n"
+    nb.Label(frame, text=f"Carrier events -> <API URL>{EVENT_PATH}\n"
+                         f"Carrier market  -> <API URL>{MARKET_PATH}\n"
                          f"The token is sent in the {TOKEN_HEADER} header.").grid(
         row=6, column=0, columnspan=2, sticky=tk.W, **pad)
     return frame

@@ -89,6 +89,16 @@ pub fn parse_carrier_event(line: &str) -> Option<CarrierEvent> {
     serde_json::from_str(line).ok()
 }
 
+/// Parse one raw `Market` line, or a whole `Market.json` document.
+///
+/// `None` = malformed, or an event that is not `Market`. Markets are not part of
+/// `CarrierEvent`: the event fires for every station the commander docks at, and
+/// a market is its own domain rather than a carrier state change.
+pub fn parse_market_event(line: &str) -> Option<MarketEvent> {
+    let market: MarketEvent = serde_json::from_str(line).ok()?;
+    (market.event == "Market").then_some(market)
+}
+
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
@@ -411,6 +421,89 @@ pub struct Faction {
     pub name: String,
 }
 
+// ---------------------------------------------------------------------------
+// Market
+// ---------------------------------------------------------------------------
+
+/// The `StationType` a fleet carrier's market reports.
+pub const FLEET_CARRIER_STATION_TYPE: &str = "FleetCarrier";
+
+/// The `Market` journal event, as written to `Market.json`.
+///
+/// The journal line carries only the header; the commodity list lives in
+/// `Market.json`, which repeats the header and adds `Items`. The ingest plugin
+/// merges the two, so this is the whole payload either way — and it splits
+/// cleanly into the event header and the commodities it lists.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct MarketEvent {
+    #[serde(rename = "timestamp")]
+    pub timestamp: String,
+    #[serde(rename = "event")]
+    pub event: String,
+    /// For a fleet carrier this equals the carrier's `CarrierID`.
+    #[serde(rename = "MarketID")]
+    pub market_id: i64,
+    pub station_name: Option<String>,
+    pub station_type: Option<String>,
+    pub carrier_docking_access: Option<String>,
+    pub star_system: Option<String>,
+    /// Absent from the journal line; present in `Market.json`.
+    #[serde(default)]
+    pub items: Vec<Commodity>,
+}
+
+impl MarketEvent {
+    /// Whether this market belongs to a fleet carrier.
+    ///
+    /// The journal emits `Market` for every station; only the carrier's own
+    /// market is tracked, so ingest drops anything else.
+    pub fn is_fleet_carrier(&self) -> bool {
+        self.station_type.as_deref() == Some(FLEET_CARRIER_STATION_TYPE)
+    }
+}
+
+/// One entry of `MarketEvent::items`.
+///
+/// The numbers carry `serde(default)` on purpose: one unexpected item should not
+/// reject a whole market, and a missing price already means "not traded" (0).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct Commodity {
+    #[serde(rename = "id")]
+    pub id: i64,
+    /// Journal symbol, e.g. `$iridium_name;`.
+    pub name: String,
+    #[serde(rename = "Name_Localised")]
+    pub name_localised: Option<String>,
+    pub category: Option<String>,
+    #[serde(rename = "Category_Localised")]
+    pub category_localised: Option<String>,
+    /// What the carrier pays; 0 when it has no buy order for this commodity.
+    #[serde(default)]
+    pub buy_price: i64,
+    /// What the carrier charges; 0 when it has no sell order.
+    #[serde(default)]
+    pub sell_price: i64,
+    #[serde(default)]
+    pub mean_price: i64,
+    /// 0-3, 3 being the highest.
+    #[serde(default)]
+    pub stock_bracket: i64,
+    #[serde(default)]
+    pub demand_bracket: i64,
+    #[serde(default)]
+    pub stock: i64,
+    #[serde(default)]
+    pub demand: i64,
+    #[serde(default)]
+    pub consumer: bool,
+    #[serde(default)]
+    pub producer: bool,
+    #[serde(default)]
+    pub rare: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,6 +600,54 @@ mod tests {
     fn on_foot_jump_has_no_carrier_id() {
         let event = parse(CARRIER_JUMP_ON_FOOT);
         assert_eq!(event.carrier_id(), None);
+    }
+
+    // A carrier market exactly as `Market.json` writes it: header plus items.
+    const MARKET_CARRIER: &str = r#"{ "timestamp":"2026-10-04T13:56:55Z", "event":"Market", "MarketID":3713341952, "StationName":"KLJ-97Z", "StationType":"FleetCarrier", "CarrierDockingAccess":"all", "StarSystem":"Pegasi Sector HX-T b3-0", "Items":[ { "id":129046165, "Name":"$iridium_name;", "Name_Localised":"Iridium", "Category":"$MARKET_category_metals;", "Category_Localised":"Metals", "BuyPrice":799015, "SellPrice":0, "MeanPrice":0, "StockBracket":0, "DemandBracket":0, "Stock":0, "Demand":0, "Consumer":false, "Producer":false, "Rare":false } ] }"#;
+
+    // The journal line for that same market: header only, no Items.
+    const MARKET_JOURNAL_LINE: &str = r#"{ "timestamp":"2026-10-04T13:56:55Z", "event":"Market", "MarketID":3713341952, "StationName":"KLJ-97Z", "StationType":"FleetCarrier", "CarrierDockingAccess":"all", "StarSystem":"Pegasi Sector HX-T b3-0" }"#;
+
+    // A regular station market, which ingest drops.
+    const MARKET_STATION: &str = r#"{ "timestamp":"2017-10-05T10:10:34Z", "event":"Market", "MarketID":128678535, "StationName":"Black Hide", "StarSystem":"Wyrd", "Items":[ { "id":128049152, "Name":"$platinum_name;", "Name_Localised":"Platinum", "Category":"$MARKET_category_metals;", "Category_Localised":"Metals", "BuyPrice":0, "SellPrice":42220, "MeanPrice":19756, "StockBracket":0, "DemandBracket":3, "Stock":0, "Demand":9182, "Consumer":true, "Producer":false, "Rare":false } ] }"#;
+
+    #[test]
+    fn market_splits_into_event_and_commodities() {
+        let market = parse_market_event(MARKET_CARRIER).expect("carrier market should parse");
+
+        assert!(market.is_fleet_carrier());
+        assert_eq!(market.market_id, 3713341952);
+        assert_eq!(market.station_name.as_deref(), Some("KLJ-97Z"));
+        assert_eq!(market.star_system.as_deref(), Some("Pegasi Sector HX-T b3-0"));
+        assert_eq!(market.carrier_docking_access.as_deref(), Some("all"));
+
+        assert_eq!(market.items.len(), 1);
+        let iridium = &market.items[0];
+        assert_eq!(iridium.id, 129046165);
+        assert_eq!(iridium.name, "$iridium_name;");
+        assert_eq!(iridium.name_localised.as_deref(), Some("Iridium"));
+        assert_eq!(iridium.category_localised.as_deref(), Some("Metals"));
+        assert_eq!(iridium.buy_price, 799015);
+        assert_eq!(iridium.sell_price, 0);
+        assert!(!iridium.consumer);
+    }
+
+    #[test]
+    fn market_journal_line_parses_without_items() {
+        let market = parse_market_event(MARKET_JOURNAL_LINE).expect("header-only line should parse");
+        assert!(market.items.is_empty());
+        assert!(market.is_fleet_carrier());
+    }
+
+    #[test]
+    fn station_market_is_not_a_fleet_carrier() {
+        let market = parse_market_event(MARKET_STATION).expect("station market should parse");
+        assert!(!market.is_fleet_carrier());
+    }
+
+    #[test]
+    fn non_market_events_are_rejected() {
+        assert!(parse_market_event(CARRIER_STATS).is_none());
     }
 
     #[test]
