@@ -81,8 +81,6 @@
 </svelte:head>
 
 <div class="carrier-page">
-
-
   <div class="carrier_info">
     {#if feed.carrier}
       <header class="carrier_header">
@@ -90,7 +88,7 @@
         {feed.carrier.name ?? 'unknown carrier'}
         <span class="callsign">{feed.carrier.callsign ?? '—'}</span>
       </h1>
-      <button onclick={toggleTheme}>Switch to {isAlien ? 'Dangerous' : 'Alien'}</button>
+      <button onclick={toggleTheme}>Change Theme</button>
     </header>
       <div class="stats">
         <div class="stat">
