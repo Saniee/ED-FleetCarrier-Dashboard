@@ -1,3 +1,7 @@
+@import '@fontsource/jura/400.css';
+@import '@fontsource/jura/600.css';
+@import '@fontsource/share-tech-mono/400.css';
+
 @font-face {
     font-family: 'Eurocaps';
     src: url('/EUROCAPS.TTF') format('truetype'); /* Upravte cestu k souboru podle toho, kde ho v projektu máte */
@@ -7,6 +11,12 @@
 }
 
 :root {
+  /* Eurocaps is a wide, caps-only display face: headings and big values only.
+     Everything people actually read goes through Jura / Share Tech Mono. */
+  --font-display: Eurocaps, Jura, sans-serif;
+  --font-body: Jura, system-ui, sans-serif;
+  --font-data: 'Share Tech Mono', ui-monospace, Consolas, monospace;
+
   --color-bg: rgb(0, 0, 0);
 
   --color-text-dangerous: rgb(255, 255, 255);
@@ -34,9 +44,19 @@ body {
     background-color: var(--color-bg);
     color: var(--color-text);
 }
-* {
-    font-family: Eurocaps, sans-serif;
-    letter-spacing: 2px;
+body {
+    font-family: var(--font-body);
+    font-size: 1rem;
+    letter-spacing: 0.02em;
+}
+/* Form controls don't inherit fonts by default (the old `*` rule hid this). */
+button, input, select, textarea {
+    font: inherit;
+    letter-spacing: inherit;
+}
+h1, h2, h3, h4, .stat__value {
+    font-family: var(--font-display);
+    letter-spacing: 0.06em;
 }
 
 /* Samotný "monitor" */
@@ -55,7 +75,7 @@ body {
 
 /* Skenovací mřížka */
 .fx__scanlines {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     bottom: 0;
@@ -64,12 +84,12 @@ body {
     z-index: 50;
     background: linear-gradient(hsla(0,6%,7%,0) 50%, rgba(0,0,0,.25) 0), linear-gradient(90deg, rgba(255,0,0,.06), rgba(0,255,0,.02), rgba(0,0,255,.06));
     background-size: 100% .25rem, .25rem 100%;
-    opacity: .7;
+    opacity: .35;
 }
 
 /* Stmavené okraje monitoru */
 .fx__overlay {
-    position: absolute;
+    position: fixed;
     inset: 0;
     pointer-events: none;
     z-index: 100;
@@ -135,7 +155,6 @@ body {
     width: 100%;
     border-collapse: collapse;
     margin-top: 1rem;
-    font-family: Jura, sans-serif;
     font-size: 0.95rem;
 }
 
@@ -180,8 +199,8 @@ body {
       background: var(--color-primary-0);
       color: var(--color-text);
       border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
-      font-size: 0.7rem;
-      letter-spacing: 3px;
+      font-size: 0.78rem;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
       white-space: nowrap;
     }
@@ -192,9 +211,10 @@ body {
 
   .carrier_info .callsign {
     margin-left: 0.75rem;
+    font-family: var(--font-body);
     font-size: 0.8rem;
-    letter-spacing: 3px;
-    opacity: 0.6;
+    letter-spacing: 0.1em;
+    opacity: 0.75;
   }
 
   .stats {
@@ -213,10 +233,10 @@ body {
 
   .stat__label {
     display: block;
-    font-size: 0.68rem;
-    letter-spacing: 3px;
+    font-size: 0.75rem;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    opacity: 0.6;
+    opacity: 0.75;
   }
 
   .stat__value {
@@ -231,8 +251,7 @@ body {
     margin-top: 0.35rem;
     font-size: 0.95rem;
     line-height: 1.3rem;
-    letter-spacing: 1px;
-    opacity: 0.8;
+    opacity: 0.85;
   }
 
   /* ---------- jump banner ---------- */
@@ -277,11 +296,11 @@ body {
     flex: none;
     padding: 0.28rem 0.8rem;
     border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
-    font-size: 0.7rem;
-    letter-spacing: 3px;
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     white-space: nowrap;
-    opacity: 0.75;
+    opacity: 0.85;
   }
 
   .status--online {
@@ -350,11 +369,10 @@ body {
   }
   .carrier_history td {
     vertical-align: top;
-    letter-spacing: 1px;
   }
   /* Dates line up column-wise. */
   .carrier_history td:nth-child(1) {
-    font-variant-numeric: tabular-nums;
+    font-family: var(--font-data);
     white-space: nowrap;
   }
   .carrier_history tbody tr:nth-child(even) {
@@ -373,8 +391,7 @@ body {
   .market__meta {
     margin: 0 0 0.6rem;
     font-size: 0.85rem;
-    letter-spacing: 1px;
-    opacity: 0.7;
+    opacity: 0.8;
   }
 
   .carrier_market table {
@@ -401,7 +418,9 @@ body {
   /* Prices and volumes line up column-wise. */
   .carrier_market .num {
     text-align: right;
-    font-variant-numeric: tabular-nums;
+  }
+  .carrier_market td.num {
+    font-family: var(--font-data);
   }
 
   .carrier_market tbody tr:nth-child(even) {
