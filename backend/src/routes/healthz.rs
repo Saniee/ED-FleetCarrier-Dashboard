@@ -1,3 +1,5 @@
-pub async fn healthz() -> &'static str {
-    "OK"
+use crate::VERSION;
+
+pub async fn healthz() -> String {
+    format!("Running OK - v{}", VERSION)
 }

@@ -8,6 +8,8 @@ mod journal_definitions;
 mod app_state;
 mod edsm;
 
+pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
 #[tokio::main]
 async fn main() {
     // Load .env for a native `cargo run`. In a container the environment is
