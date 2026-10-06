@@ -85,7 +85,7 @@
     {#if feed.carrier}
       <header class="carrier_header">
         <h1>
-        {feed.carrier.name ?? 'unknown carrier'}
+        {feed.carrier.name ?? 'unnamed carrier'}
         <span class="callsign">{feed.carrier.callsign ?? '—'}</span>
       </h1>
       <button onclick={toggleTheme}>Change Theme</button>
