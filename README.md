@@ -27,7 +27,7 @@ Mainly:
 ## Multi-tenant Setup
 Heavily WIP on the [release/multiple-tenants](https://github.com/Saniee/ED-FleetCarrier-Dashboard/tree/release/multiple-tenants) branch.
 
-The database already supports multiple carriers, and the backend has endpoints for fetching via `carrier_id`, however there are is no handling for:
-- [ ] User Registration / Login | Issue #1
-    - [ ] Per User Api Tokens
-- [ ] Paginated list of Carriers in the database. | Issue #2
+The database already supports multiple carriers, and the backend has endpoints for fetching via `carrier_id`, ~~however there are is no handling for~~:
+- [x] User Registration / Login | Issue #1
+    - [x] Per User Api Tokens
+- [x] Paginated list of Carriers in the database. | Issue #2

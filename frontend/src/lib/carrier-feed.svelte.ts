@@ -1,3 +1,4 @@
+import { api, auth } from './auth.svelte';
 import type { Carrier, CarrierEventRow } from './types/carrier';
 import type { MarketSnapshot } from './types/market';
 
@@ -23,11 +24,12 @@ export const HISTORY_LIMIT = 20;
 
 /**
  * Live carrier feed: the SSE stream, its reconnect backoff, a liveness probe,
- * and the history fetch that follows whichever carrier is current.
+ * and the history fetch for one carrier, addressed by callsign.
  *
  * Call `start()` on mount and `stop()` on teardown.
  */
-export function createCarrierFeed(initial: Carrier | null) {
+export function createCarrierFeed(initial: Carrier | null, callsign: string) {
+	const base = `/api/carriers/${encodeURIComponent(callsign)}`;
 	let carrier = $state<Carrier | null>(initial);
 	let events = $state<CarrierEventRow[] | null>(null);
 	let market = $state<MarketSnapshot | null>(null);
@@ -41,10 +43,10 @@ export function createCarrierFeed(initial: Carrier | null) {
 	// Guards against a slow history response landing after a newer one.
 	let historySeq = 0;
 
-	async function loadHistory(carrierId: number) {
+	async function loadHistory() {
 		const seq = ++historySeq;
 		try {
-			const res = await fetch(`/api/carrier/${carrierId}/events?limit=${HISTORY_LIMIT}`);
+			const res = await api(`${base}/events?limit=${HISTORY_LIMIT}`);
 			if (!res.ok) return;
 			const rows: CarrierEventRow[] = await res.json();
 			if (seq === historySeq) events = rows;
@@ -54,7 +56,12 @@ export function createCarrierFeed(initial: Carrier | null) {
 	}
 
 	function connect() {
-		source = new EventSource('/api/carrier/stream');
+		// EventSource cannot send headers, so an owner_only carrier is opened with
+		// the session token in the query string.
+		const token = auth.token;
+		source = new EventSource(
+			token ? `${base}/stream?access_token=${encodeURIComponent(token)}` : `${base}/stream`
+		);
 
 		source.onopen = () => {
 			attempt = 0;
@@ -64,7 +71,7 @@ export function createCarrierFeed(initial: Carrier | null) {
 		source.addEventListener('carrier', (e) => {
 			const next = JSON.parse((e as MessageEvent).data) as Carrier;
 			carrier = next;
-			void loadHistory(next.carrier_id);
+			void loadHistory();
 		});
 
 		// The market arrives whole — header plus commodities — on the same
@@ -136,9 +143,19 @@ export function createCarrierFeed(initial: Carrier | null) {
 		}
 	}
 
+	/** Re-read the carrier row, for changes the stream does not announce (claim, privacy). */
+	async function reload() {
+		try {
+			const res = await api(base);
+			if (res.ok) carrier = (await res.json()) as Carrier;
+		} catch {
+			// Offline; the stream or the next action retries.
+		}
+	}
+
 	function start() {
 		// Seed history from the load function's carrier before the first event.
-		if (carrier) void loadHistory(carrier.carrier_id);
+		if (carrier) void loadHistory();
 
 		connect();
 		pingTimer = setInterval(ping, PING_MS);
@@ -164,6 +181,7 @@ export function createCarrierFeed(initial: Carrier | null) {
 		get status() {
 			return status;
 		},
+		reload,
 		start,
 		stop,
 	};

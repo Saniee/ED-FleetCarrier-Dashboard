@@ -1,3 +1,5 @@
+import type { Visibility } from '../visibility';
+
 /**
  * Types for the carrier API.
  *
@@ -149,6 +151,12 @@ export interface Carrier {
 
 	// Bookkeeping
 	last_event_id: number | null;
+
+	// Tenancy
+	owner_id: number | null;
+	visibility: Visibility;
+	/** Location last reported by someone other than the owner; show a `*`. */
+	location_unverified: boolean;
 	updated_at: string;
 }
 
@@ -420,3 +428,25 @@ export type CarrierEventJson =
 
 /** Every event name the API can return in `event_name`. */
 export type CarrierEventName = CarrierEventJson['event'];
+
+/** One row of `GET /api/carriers` (and `/api/carriers/mine`, which adds `is_private`). */
+export interface CarrierListItem {
+	carrier_id: number;
+	callsign: string | null;
+	name: string | null;
+	variant?: string | null;
+	star_system: string | null;
+	docked?: boolean | null;
+	docking_access?: string | null;
+	location_unverified?: boolean;
+	visibility?: Visibility;
+	updated_at: string;
+}
+
+export interface CarrierPage {
+	items: CarrierListItem[];
+	page: number;
+	per_page: number;
+	total: number;
+	total_pages: number;
+}

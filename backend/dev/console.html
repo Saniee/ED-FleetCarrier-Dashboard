@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API dev console</title>
+<style>
+  body { font: 14px/1.4 monospace; margin: 1rem; max-width: 1100px; }
+  fieldset { margin: 0 0 1rem; }
+  legend { font-weight: bold; }
+  input, button, textarea, select { font: inherit; }
+  textarea { width: 100%; height: 9rem; box-sizing: border-box; }
+  pre { background: #eee; padding: .5rem; max-height: 22rem; overflow: auto; white-space: pre-wrap; }
+  .row { margin: .3rem 0; }
+  .ok { color: #070; } .err { color: #a00; }
+  table { border-collapse: collapse; } td, th { border: 1px solid #999; padding: 2px 6px; }
+</style>
+</head>
+<body>
+<h1>API dev console</h1>
+<p>Barebones test page for the multi-tenant backend. Served by the backend itself at <code>/dev</code> (only when <code>DEV_CONSOLE=1</code>), so it is same-origin and needs no frontend.</p>
+
+<div class="row">Status: <span id="status">not logged in</span> | <span id="health"></span> <button id="btnHealth">healthz</button></div>
+
+<fieldset><legend>Account</legend>
+  <div class="row">
+    <input id="user" placeholder="username"> <input id="pass" type="password" placeholder="password">
+    <button id="btnRegister">Register</button> <button id="btnLogin">Login</button>
+    <button id="btnLogout">Logout</button> <button id="btnMe">Me</button>
+  </div>
+</fieldset>
+
+<fieldset><legend>API tokens (for the EDMC plugin)</legend>
+  <div class="row"><input id="tokName" placeholder="token name" value="plugin">
+    <button id="btnTokNew">Create</button> <button id="btnTokList">List</button></div>
+  <div class="row">New secret (shown once): <input id="tokSecret" size="70" readonly></div>
+  <div id="tokList"></div>
+</fieldset>
+
+<fieldset><legend>Carriers</legend>
+  <div class="row">
+    search <input id="q" size="12"> page <input id="page" size="3" value="1"> per_page <input id="perPage" size="3" value="20">
+    <button id="btnList">List public</button> <button id="btnMine">My carriers</button>
+  </div>
+  <div id="carrierList"></div>
+  <div class="row">
+    callsign <input id="callsign" size="10" placeholder="KLJ-97Z">
+    <button id="btnGet">Get</button> <button id="btnEvents">Events</button> <button id="btnMarket">Market</button>
+    <button id="btnClaim">Claim</button> <button id="btnRelease">Release</button>
+    <select id="visibility"><option>public</option><option>private</option><option>owner_only</option></select>
+    <button id="btnVisibility">Set visibility</button>
+  </div>
+  <div class="row">Stream: <button id="btnStream">Open</button> <button id="btnStreamStop">Close</button> <span id="streamState">closed</span></div>
+</fieldset>
+
+<fieldset><legend>Ingest (as the plugin would)</legend>
+  <div class="row">
+    <label>X-Ingest-Token <input id="ingestTok" size="60" placeholder="API token secret (blank = none / legacy)"></label>
+  </div>
+  <div class="row">
+    <select id="sample">
+      <option value="stats">CarrierStats (claims)</option>
+      <option value="market">Market (visitor event)</option>
+    </select>
+    <button id="btnSample">Load sample</button>
+    <button id="btnSendEvent">POST /api/carrier/event</button>
+    <button id="btnSendMarket">POST /api/market/event</button>
+  </div>
+  <textarea id="body"></textarea>
+</fieldset>
+
+<h3>Last response</h3>
+<pre id="out"></pre>
+<h3>Stream log</h3>
+<pre id="stream"></pre>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let session = null;
+try { session = JSON.parse(sessionStorage.getItem('session')); } catch {}
+
+const SAMPLES = {
+  stats: { timestamp: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), event: 'CarrierStats', CarrierID: 3713341952, CarrierType: 'FleetCarrier', Callsign: 'KLJ-97Z', Name: 'COMODO CLASS', DockingAccess: 'all', AllowNotorious: false, FuelLevel: 500, JumpRangeCurr: 500, JumpRangeMax: 500, PendingDecommission: false, SpaceUsage: { TotalCapacity: 25000, Crew: 0, Cargo: 0, CargoSpaceReserved: 0, ShipPacks: 0, ModulePacks: 0, FreeSpace: 25000 }, Finance: { CarrierBalance: 0, ReserveBalance: 0, AvailableBalance: 0 }, Crew: [{ CrewRole: 'BlackMarket', Activated: false }, { CrewRole: 'Captain', Activated: true, Enabled: true, CrewName: 'Norma Allison' }], ShipPacks: [], ModulePacks: [] },
+  market: { timestamp: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), event: 'Market', MarketID: 3713341952, StationName: 'KLJ-97Z', StationType: 'FleetCarrier', CarrierDockingAccess: 'all', StarSystem: 'Pegasi Sector HX-T b3-0', Items: [{ id: 129046165, Name: '$iridium_name;', Name_Localised: 'Iridium', Category: '$MARKET_category_metals;', Category_Localised: 'Metals', BuyPrice: 799015, SellPrice: 0, MeanPrice: 0, StockBracket: 0, DemandBracket: 0, Stock: 0, Demand: 0, Consumer: false, Producer: false, Rare: false }] },
+};
+
+function show(label, status, data) {
+  const ok = status >= 200 && status < 300;
+  $('out').innerHTML = '';
+  const head = document.createElement('div');
+  head.className = ok ? 'ok' : 'err';
+  head.textContent = `${label} -> ${status}`;
+  $('out').append(head, document.createTextNode(typeof data === 'string' ? data : JSON.stringify(data, null, 2)));
+}
+
+async function call(label, method, path, { body, auth, headers } = {}) {
+  const h = { ...(headers || {}) };
+  if (body !== undefined) h['Content-Type'] = 'application/json';
+  if (auth) {
+    if (!session) { show(label, 0, 'Not logged in'); return null; }
+    h.Authorization = 'Bearer ' + session.token;
+  }
+  try {
+    const res = await fetch(path, { method, headers: h, body: body === undefined ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)) });
+    const text = await res.text();
+    let data = text;
+    try { data = text ? JSON.parse(text) : ''; } catch {}
+    show(`${method} ${path}`, res.status, data);
+    return { status: res.status, data };
+  } catch (e) { show(label, 0, String(e)); return null; }
+}
+
+function renderStatus() {
+  $('status').textContent = session ? `logged in as ${session.user.username} (expires ${session.expires_at})` : 'not logged in';
+}
+renderStatus();
+
+const cs = () => encodeURIComponent($('callsign').value.trim());
+const creds = () => ({ username: $('user').value, password: $('pass').value });
+
+$('btnHealth').onclick = async () => { const r = await call('healthz', 'GET', '/api/healthz'); $('health').textContent = r ? JSON.stringify(r.data) : 'unreachable'; };
+$('btnRegister').onclick = () => call('register', 'POST', '/api/auth/register', { body: creds() });
+$('btnLogin').onclick = async () => {
+  const r = await call('login', 'POST', '/api/auth/login', { body: creds() });
+  if (r && r.status === 200) { session = r.data; sessionStorage.setItem('session', JSON.stringify(session)); renderStatus(); }
+};
+$('btnLogout').onclick = async () => {
+  await call('logout', 'POST', '/api/auth/logout', { auth: true });
+  session = null; sessionStorage.removeItem('session'); renderStatus();
+};
+$('btnMe').onclick = () => call('me', 'GET', '/api/auth/me', { auth: true });
+
+async function listTokens() {
+  const r = await call('list tokens', 'GET', '/api/auth/tokens', { auth: true });
+  const box = $('tokList'); box.innerHTML = '';
+  if (!r || r.status !== 200) return;
+  const t = document.createElement('table');
+  t.innerHTML = '<tr><th>id</th><th>name</th><th>created</th><th>last used</th><th></th></tr>';
+  for (const k of r.data) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${k.id}</td><td></td><td>${k.created_at}</td><td>${k.last_used_at ?? '-'}</td><td><button>revoke</button></td>`;
+    tr.children[1].textContent = k.name;
+    tr.querySelector('button').onclick = async () => { await call('revoke', 'DELETE', `/api/auth/tokens/${k.id}`, { auth: true }); listTokens(); };
+    t.append(tr);
+  }
+  box.append(t);
+}
+$('btnTokList').onclick = listTokens;
+$('btnTokNew').onclick = async () => {
+  const r = await call('create token', 'POST', '/api/auth/tokens', { auth: true, body: { name: $('tokName').value } });
+  if (r && r.status === 201) { $('tokSecret').value = r.data.token; $('ingestTok').value = r.data.token; listTokens(); }
+};
+
+function renderCarriers(rows) {
+  const box = $('carrierList'); box.innerHTML = '';
+  const t = document.createElement('table');
+  t.innerHTML = '<tr><th>callsign</th><th>name</th><th>system</th><th>flags</th><th></th></tr>';
+  for (const c of rows) {
+    const tr = document.createElement('tr');
+    const flags = [c.visibility && c.visibility !== 'public' ? c.visibility : '', c.location_unverified ? 'location*' : ''].filter(Boolean).join(' ');
+    tr.innerHTML = '<td></td><td></td><td></td><td></td><td><button>select</button></td>';
+    tr.children[0].textContent = c.callsign ?? '(none)';
+    tr.children[1].textContent = c.name ?? '';
+    tr.children[2].textContent = (c.star_system ?? '') + (c.location_unverified ? ' *' : '');
+    tr.children[3].textContent = flags;
+    tr.querySelector('button').onclick = () => { $('callsign').value = c.callsign ?? ''; };
+    t.append(tr);
+  }
+  box.append(t);
+}
+$('btnList').onclick = async () => {
+  const p = new URLSearchParams({ page: $('page').value, per_page: $('perPage').value });
+  if ($('q').value.trim()) p.set('q', $('q').value.trim());
+  const r = await call('list', 'GET', '/api/carriers?' + p);
+  if (r && r.status === 200) renderCarriers(r.data.items);
+};
+$('btnMine').onclick = async () => {
+  const r = await call('mine', 'GET', '/api/carriers/mine', { auth: true });
+  if (r && r.status === 200) renderCarriers(r.data);
+};
+const optAuth = () => !!session;
+$('btnGet').onclick = () => call('get', 'GET', `/api/carriers/${cs()}`, { auth: optAuth() });
+$('btnEvents').onclick = () => call('events', 'GET', `/api/carriers/${cs()}/events?limit=10`, { auth: optAuth() });
+$('btnMarket').onclick = () => call('market', 'GET', `/api/carriers/${cs()}/market`, { auth: optAuth() });
+$('btnClaim').onclick = () => call('claim', 'POST', `/api/carriers/${cs()}/claim`, { auth: true });
+$('btnRelease').onclick = () => call('release', 'DELETE', `/api/carriers/${cs()}/claim`, { auth: true });
+$('btnVisibility').onclick = () => call('visibility', 'PATCH', `/api/carriers/${cs()}`, { auth: true, body: { visibility: $('visibility').value } });
+
+let es = null;
+function stopStream() { if (es) es.close(); es = null; $('streamState').textContent = 'closed'; }
+$('btnStreamStop').onclick = stopStream;
+$('btnStream').onclick = () => {
+  stopStream();
+  es = new EventSource(`/api/carriers/${cs()}/stream` + (session ? `?access_token=${encodeURIComponent(session.token)}` : ''));
+  $('streamState').textContent = 'connecting...';
+  es.onopen = () => { $('streamState').textContent = 'open'; };
+  es.onerror = () => { $('streamState').textContent = 'error / reconnecting'; };
+  for (const name of ['carrier', 'market']) {
+    es.addEventListener(name, (e) => {
+      const line = `[${new Date().toLocaleTimeString()}] ${name}: ${e.data.slice(0, 300)}${e.data.length > 300 ? '...' : ''}\n`;
+      $('stream').textContent = line + $('stream').textContent;
+    });
+  }
+};
+
+$('btnSample').onclick = () => { $('body').value = JSON.stringify(SAMPLES[$('sample').value], null, 2); };
+$('btnSample').click();
+function ingest(path) {
+  const t = $('ingestTok').value.trim();
+  return call('ingest', 'POST', path, { body: $('body').value, headers: t ? { 'X-Ingest-Token': t } : {} });
+}
+$('btnSendEvent').onclick = () => ingest('/api/carrier/event');
+$('btnSendMarket').onclick = () => ingest('/api/market/event');
+
+$('btnHealth').click();
+</script>
+</body>
+</html>

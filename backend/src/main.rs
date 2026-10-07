@@ -6,6 +6,7 @@ mod db;
 mod routes;
 mod journal_definitions;
 mod app_state;
+mod auth;
 mod edsm;
 
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -24,8 +25,13 @@ async fn main() {
     let state = app_state::AppState {
         db_pool: pool,
         http: edsm::client(),
-        tx
+        tx,
+        legacy_token: std::env::var("TOKEN").ok().filter(|t| !t.trim().is_empty()),
     };
+
+    if state.legacy_token.is_none() {
+        eprintln!("WARNING: TOKEN is not set; token-less ingest requests are accepted.");
+    }
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
     println!("Backend UP! Listening at 0.0.0.0:8080");

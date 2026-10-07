@@ -1,5 +1,6 @@
 use axum::{
-    extract::State,
+    extract::{Path, State},
+    http::StatusCode,
     response::{
         Sse,
         sse::{Event, KeepAlive},
@@ -10,26 +11,44 @@ use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
 
 use crate::{
     app_state::{AppState, Update},
+    auth::Viewer,
     db,
 };
 
-use super::market;
+use super::{carriers::resolve_visible, market};
 
-/// Server-sent stream of dashboard state.
-///
-/// A new subscriber is sent the current carrier and its market immediately, then
-/// a fresh snapshot of whichever changed after every applied event. Two named
-/// events travel this one connection — `carrier` and `market` — so the frontend
-/// needs a single `EventSource`.
-pub async fn stream(
+/// Server-sent stream for one carrier, addressed by callsign. Authorised like
+/// the other reads; EventSource cannot send headers, so a session token may be
+/// passed as `?access_token=`.
+pub async fn stream_by_callsign(
+    Path(callsign): Path<String>,
     State(state): State<AppState>,
-) -> Sse<impl Stream<Item = Result<Event, axum::Error>>> {
-    let rx = state.tx.subscribe();
+    viewer: Viewer,
+) -> Result<Sse<impl Stream<Item = Result<Event, axum::Error>>>, StatusCode> {
+    let carrier_id = resolve_visible(&state, &callsign, &viewer).await?;
 
-    let carrier = db::carriers::get_current(&state.db_pool)
+    let carrier = db::carriers::get(&state.db_pool, carrier_id)
         .await
         .ok()
         .flatten();
+
+    Ok(open(state, carrier, Some(carrier_id)).await)
+}
+
+/// A new subscriber is sent the carrier and its market immediately, then a
+/// fresh snapshot of whichever changed after every applied event. Two named
+/// events travel this one connection — `carrier` and `market` — so the frontend
+/// needs a single `EventSource`. `only` restricts updates to one carrier.
+///
+/// Visibility is checked once, when the stream opens; a carrier switched to
+/// `owner_only` afterwards keeps feeding streams that were already open.
+async fn open(
+    state: AppState,
+    carrier: Option<Value>,
+    only: Option<i64>,
+) -> Sse<impl Stream<Item = Result<Event, axum::Error>>> {
+    // Subscribe before reading anything else so no update is missed in between.
+    let rx = state.tx.subscribe();
 
     let mut initial: Vec<Result<Event, axum::Error>> = Vec::new();
 
@@ -37,19 +56,24 @@ pub async fn stream(
         initial.push(Ok(carrier_event(snapshot)));
     }
 
-    // The market belongs to the current carrier, and there may not be one yet.
+    // The market belongs to the carrier, and there may not be one yet.
     if let Some(carrier_id) = carrier_id_of(carrier.as_ref())
         && let Ok(Some(snapshot)) = market::snapshot(&state.db_pool, carrier_id).await
     {
         initial.push(Ok(market_event(&snapshot)));
     }
 
-    let updates = BroadcastStream::new(rx).filter_map(|msg| match msg {
-        Ok(Update::Carrier(snapshot)) => Some(Ok(carrier_event(&snapshot))),
-        Ok(Update::Market(snapshot)) => Some(Ok(market_event(&snapshot))),
-        // A subscriber that fell behind skips missed snapshots; each published
-        // snapshot is a full replacement, so the next one is enough to catch up.
-        Err(_lagged) => None,
+    let updates = BroadcastStream::new(rx).filter_map(move |msg| match msg {
+        Ok(Update::Carrier(id, snapshot)) if only.is_none_or(|o| o == id) => {
+            Some(Ok(carrier_event(&snapshot)))
+        }
+        Ok(Update::Market(id, snapshot)) if only.is_none_or(|o| o == id) => {
+            Some(Ok(market_event(&snapshot)))
+        }
+        // Another carrier's update, or a subscriber that fell behind and skips
+        // missed snapshots; each published snapshot is a full replacement, so
+        // the next one is enough to catch up.
+        _ => None,
     });
 
     Sse::new(tokio_stream::iter(initial).chain(updates)).keep_alive(KeepAlive::default())

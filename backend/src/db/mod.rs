@@ -3,6 +3,7 @@ pub mod carriers;
 pub mod market;
 pub mod commodities;
 pub mod body_names;
+pub mod users;
 
 use sqlx::PgPool;
 

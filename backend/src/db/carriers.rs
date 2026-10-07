@@ -65,14 +65,6 @@ pub async fn get(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<CarrierS
         .await
 }
 
-/// The most recently updated carrier, for single-tenant reads and as the
-/// initial payload sent to a new stream subscriber.
-pub async fn get_current(pool: &PgPool) -> sqlx::Result<Option<CarrierSnapshot>> {
-    sqlx::query_scalar("SELECT to_jsonb(c) FROM carriers c ORDER BY updated_at DESC LIMIT 1")
-        .fetch_optional(pool)
-        .await
-}
-
 /// Make sure a `carriers` row exists for `carrier_id`, creating a bare one if not.
 ///
 /// A carrier's market can be the first thing we ever see for it, and
@@ -790,4 +782,168 @@ async fn trade_order(pool: &PgPool, e: &CarrierTradeOrder) -> sqlx::Result<i64> 
     }
 
     write_jsonb(pool, e.carrier_id, "trade_orders", &orders).await
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy: ownership, privacy, lookup by callsign, discovery
+// ---------------------------------------------------------------------------
+
+/// Who owns a carrier row, as far as ingest authorisation is concerned.
+pub enum Ownership {
+    /// No row: the carrier has never been seen.
+    Missing,
+    /// A row nobody has claimed.
+    Unowned,
+    Owned(i64),
+}
+
+pub async fn ownership(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Ownership> {
+    let owner: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT owner_id FROM carriers WHERE carrier_id = $1")
+            .bind(carrier_id)
+            .fetch_optional(pool)
+            .await?;
+
+    Ok(match owner {
+        None => Ownership::Missing,
+        Some(None) => Ownership::Unowned,
+        Some(Some(id)) => Ownership::Owned(id),
+    })
+}
+
+/// Record whether the location just written came from someone other than the
+/// owner. `reporter` is the reporting user, or `None` for the legacy token,
+/// which is trusted. An unowned carrier's location is never verified.
+pub async fn set_location_unverified(
+    pool: &PgPool,
+    carrier_id: i64,
+    reporter: Option<i64>,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE carriers
+         SET location_unverified = ($2::bigint IS NOT NULL AND owner_id IS DISTINCT FROM $2)
+         WHERE carrier_id = $1",
+    )
+    .bind(carrier_id)
+    .bind(reporter)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// A carrier found by callsign: `(carrier_id, owner_id, visibility)`,
+/// case-insensitively.
+pub async fn find_by_callsign(
+    pool: &PgPool,
+    callsign: &str,
+) -> sqlx::Result<Option<(i64, Option<i64>, String)>> {
+    sqlx::query_as(
+        "SELECT carrier_id, owner_id, visibility FROM carriers WHERE upper(callsign) = upper($1)",
+    )
+    .bind(callsign)
+    .fetch_optional(pool)
+    .await
+}
+
+/// Claim an unowned carrier. `false` when it was already owned by someone.
+pub async fn claim(pool: &PgPool, carrier_id: i64, user_id: i64) -> sqlx::Result<bool> {
+    let done = sqlx::query(
+        "UPDATE carriers SET owner_id = $2 WHERE carrier_id = $1 AND owner_id IS NULL",
+    )
+    .bind(carrier_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
+/// Release a carrier. `false` when `user_id` does not own it.
+pub async fn release(pool: &PgPool, carrier_id: i64, user_id: i64) -> sqlx::Result<bool> {
+    let done = sqlx::query(
+        "UPDATE carriers SET owner_id = NULL WHERE carrier_id = $1 AND owner_id = $2",
+    )
+    .bind(carrier_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
+/// Set the visibility (`public`, `private` or `owner_only`). `false` when
+/// `user_id` does not own the carrier.
+pub async fn set_visibility(
+    pool: &PgPool,
+    carrier_id: i64,
+    user_id: i64,
+    visibility: &str,
+) -> sqlx::Result<bool> {
+    let done = sqlx::query(
+        "UPDATE carriers SET visibility = $3 WHERE carrier_id = $1 AND owner_id = $2",
+    )
+    .bind(carrier_id)
+    .bind(user_id)
+    .bind(visibility)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
+/// Carriers owned by a user, whatever their visibility.
+pub async fn list_owned(pool: &PgPool, user_id: i64) -> sqlx::Result<Vec<Value>> {
+    sqlx::query_scalar(
+        "SELECT jsonb_build_object(
+             'carrier_id', carrier_id, 'callsign', callsign, 'name', name,
+             'star_system', star_system, 'visibility', visibility, 'updated_at', updated_at)
+         FROM carriers WHERE owner_id = $1 ORDER BY updated_at DESC",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+}
+
+/// One page of publicly discoverable carriers, most recently active first,
+/// plus the total count. Only `public` carriers with a callsign are listed (one
+/// without a callsign has no link to share yet). `search` matches callsign, name
+/// or system.
+pub async fn list_public(
+    pool: &PgPool,
+    search: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<(Vec<Value>, i64)> {
+    let pattern = search.map(|s| {
+        let escaped = s
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        format!("%{escaped}%")
+    });
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM carriers
+         WHERE visibility = 'public' AND callsign IS NOT NULL AND
+               ($1::text IS NULL OR callsign ILIKE $1 OR name ILIKE $1 OR star_system ILIKE $1)",
+    )
+    .bind(&pattern)
+    .fetch_one(pool)
+    .await?;
+
+    let items = sqlx::query_scalar(
+        "SELECT jsonb_build_object(
+             'carrier_id', carrier_id, 'callsign', callsign, 'name', name,
+             'variant', variant, 'star_system', star_system, 'docked', docked,
+             'docking_access', docking_access, 'location_unverified', location_unverified,
+             'updated_at', updated_at)
+         FROM carriers
+         WHERE visibility = 'public' AND callsign IS NOT NULL AND
+               ($1::text IS NULL OR callsign ILIKE $1 OR name ILIKE $1 OR star_system ILIKE $1)
+         ORDER BY updated_at DESC, carrier_id LIMIT $2 OFFSET $3",
+    )
+    .bind(&pattern)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+
+    Ok((items, total))
 }

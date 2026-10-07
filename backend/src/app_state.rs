@@ -18,9 +18,10 @@ pub type MarketSnapshot = Value;
 #[derive(Clone, Debug)]
 pub enum Update {
     /// A carrier's table after an applied carrier event.
-    Carrier(CarrierSnapshot),
+    /// (carrier_id, snapshot); the id lets per-carrier streams filter.
+    Carrier(i64, CarrierSnapshot),
     /// A carrier's market after an applied `Market` event.
-    Market(MarketSnapshot),
+    Market(i64, MarketSnapshot),
 }
 
 #[derive(Clone)]
@@ -32,4 +33,8 @@ pub struct AppState {
     /// Fan-out of dashboard updates to live subscribers. Every applied event
     /// publishes a freshly read snapshot here.
     pub tx: broadcast::Sender<Update>,
+    /// Legacy shared ingest secret from the `TOKEN` env var. Per-user API
+    /// tokens are checked first; this is the fallback for existing installs.
+    /// `None` leaves ingest open to token-less requests (dev only).
+    pub legacy_token: Option<String>,
 }

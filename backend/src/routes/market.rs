@@ -8,6 +8,7 @@ use sqlx::PgPool;
 
 use crate::{
     app_state::{AppState, Update},
+    auth::{Access, Ingest, Viewer},
     db::{carriers, commodities, market},
     journal_definitions::MarketEvent,
 };
@@ -35,6 +36,7 @@ pub async fn snapshot(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<Val
 /// every market the commander opens, and a station market is not an error.
 pub async fn post(
     State(state): State<AppState>,
+    ingest: Ingest,
     Json(payload): Json<MarketEvent>,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
     if payload.event != "Market" {
@@ -58,6 +60,19 @@ pub async fn post(
     // For a fleet carrier the journal's `MarketID` is its `CarrierID`.
     let carrier_id = payload.market_id;
 
+    // Anyone docked at a carrier gets a `Market` event, and any user may report
+    // one: more reporters keep the market fresher.
+    if let Access::Skip = ingest
+        .check(&state.db_pool, Some(carrier_id), true)
+        .await
+        .map_err(|s| (s, "forbidden".to_string()))?
+    {
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(json!({ "stored": false, "reason": "carrier not tracked" })),
+        ));
+    }
+
     // The market's foreign key points at `carriers`, so make sure a row exists —
     // the market can be the first event we ever see for a carrier.
     carriers::ensure(&state.db_pool, carrier_id)
@@ -74,7 +89,7 @@ pub async fn post(
     tx.commit().await.map_err(internal)?;
 
     if let Some(snapshot) = snapshot(&state.db_pool, carrier_id).await.map_err(internal)? {
-        let _ = state.tx.send(Update::Market(snapshot));
+        let _ = state.tx.send(Update::Market(carrier_id, snapshot));
     }
 
     Ok((
@@ -87,11 +102,13 @@ pub async fn post(
     ))
 }
 
-/// The current market for a carrier.
-pub async fn get_by_carrier(
-    Path(carrier_id): Path<i64>,
+/// The current market for a carrier addressed by callsign.
+pub async fn get_by_callsign(
+    Path(callsign): Path<String>,
     State(state): State<AppState>,
+    viewer: Viewer,
 ) -> Result<Json<Value>, StatusCode> {
+    let carrier_id = super::carriers::resolve_visible(&state, &callsign, &viewer).await?;
     snapshot(&state.db_pool, carrier_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?

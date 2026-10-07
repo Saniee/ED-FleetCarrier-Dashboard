@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 
 use crate::{
     app_state::{AppState, Update},
+    auth::{Access, Ingest},
     db::{body_names, carriers, log_event},
     edsm,
     journal_definitions::{CarrierEvent, CarrierLocation},
@@ -12,8 +13,21 @@ use crate::{
 /// refreshed table to live subscribers.
 pub async fn post(
     State(state): State<AppState>,
+    ingest: Ingest,
     Json(payload): Json<CarrierEvent>,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
+    // 0. A user token may only write to its own (or an unclaimed) carrier.
+    if let Access::Skip = ingest
+        .check(&state.db_pool, payload.carrier_id(), is_visitor_event(&payload))
+        .await
+        .map_err(|s| (s, "carrier belongs to another user".to_string()))?
+    {
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(json!({ "stored": false, "reason": "carrier not tracked, or event not attributable to one" })),
+        ));
+    }
+
     // 1. Apply the event to the carrier state table first. `carrier_events.carrier`
     //    is a foreign key onto `carriers`, so the carriers row has to exist before
     //    the history row that references it is written.
@@ -25,6 +39,30 @@ pub async fn post(
     let event_id = log_event::insert(&state.db_pool, &payload, carrier_id)
         .await
         .map_err(internal)?;
+
+    // CarrierStats only ever comes from the owner's own carrier management, so
+    // it is the one event that proves ownership: the first user token to post it
+    // for an unclaimed carrier claims it. (CarrierBuy is not used: players often
+    // start the plugin after buying.) The legacy token never claims.
+    if let (Ingest::User(user_id), Some(id), CarrierEvent::CarrierStats(_)) =
+        (ingest, carrier_id, &payload)
+    {
+        carriers::claim(&state.db_pool, id, user_id)
+            .await
+            .map_err(internal)?;
+    }
+
+    // Location events from anyone but the owner are flagged so clients can mark
+    // the location as unconfirmed; the owner's own event clears the flag.
+    if let (Some(id), true) = (carrier_id, is_visitor_event(&payload)) {
+        let reporter = match ingest {
+            Ingest::User(user_id) => Some(user_id),
+            Ingest::Legacy => None,
+        };
+        carriers::set_location_unverified(&state.db_pool, id, reporter)
+            .await
+            .map_err(internal)?;
+    }
 
     // 3. Stamp which history row produced the current state, then publish the
     //    refreshed table. Events that could not be attributed to a carrier
@@ -42,7 +80,7 @@ pub async fn post(
             .map_err(internal)?;
 
         if let Some(snapshot) = carriers::get(&state.db_pool, id).await.map_err(internal)? {
-            let _ = state.tx.send(Update::Carrier(snapshot));
+            let _ = state.tx.send(Update::Carrier(id, snapshot));
         }
     }
 
@@ -50,6 +88,13 @@ pub async fn post(
         StatusCode::ACCEPTED,
         Json(json!({ "event_id": event_id, "carrier_id": carrier_id })),
     ))
+}
+
+/// Events a commander generates merely by being docked at a carrier, so they say
+/// nothing about who owns it. Any user may report them for any carrier. Everything
+/// else comes from carrier management, which only the owner has.
+fn is_visitor_event(event: &CarrierEvent) -> bool {
+    matches!(event, CarrierEvent::CarrierJump(_) | CarrierEvent::CarrierLocation(_))
 }
 
 /// Give a carrier its body name back after a `CarrierLocation`.
