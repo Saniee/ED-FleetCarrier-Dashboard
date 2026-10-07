@@ -9,14 +9,11 @@ use crate::{
     journal_definitions::{CarrierEvent, CarrierLocation},
 };
 
-/// Ingest one journal event, apply it to the carrier table, and publish the
-/// refreshed table to live subscribers.
 pub async fn post(
     State(state): State<AppState>,
     ingest: Ingest,
     Json(payload): Json<CarrierEvent>,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
-    // 0. A user token may only write to its own (or an unclaimed) carrier.
     if let Access::Skip = ingest
         .check(&state.db_pool, payload.carrier_id(), is_visitor_event(&payload))
         .await
@@ -35,7 +32,6 @@ pub async fn post(
         .await
         .map_err(internal)?;
 
-    // 2. Append the raw event to the history.
     let event_id = log_event::insert(&state.db_pool, &payload, carrier_id)
         .await
         .map_err(internal)?;
@@ -110,7 +106,6 @@ async fn resolve_body_name(state: &AppState, carrier_id: i64, location: &Carrier
         Ok(body_names::Cached::Named { name, body_type }) => {
             set_body(state, carrier_id, Some(&name), body_type.as_deref()).await;
         }
-        // Already asked; EDSM has no such body.
         Ok(body_names::Cached::Absent) => {}
         Ok(body_names::Cached::Unknown) => {
             fetch_system(state, carrier_id, system_address, body_id).await;
@@ -119,8 +114,6 @@ async fn resolve_body_name(state: &AppState, carrier_id: i64, location: &Carrier
     }
 }
 
-/// Ask EDSM for the whole system, cache every body it returns, and apply the one
-/// this carrier is at.
 async fn fetch_system(state: &AppState, carrier_id: i64, system_address: i64, body_id: i64) {
     let bodies = match edsm::fetch_bodies(&state.http, system_address).await {
         Ok(bodies) => bodies,

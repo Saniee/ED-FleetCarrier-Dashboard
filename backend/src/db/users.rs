@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::PgPool;
 
-/// A registered user, without the password hash.
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
 pub struct User {
     pub id: i64,
@@ -35,7 +34,6 @@ pub async fn create(
     .await
 }
 
-/// A user and their password hash, looked up case-insensitively by username.
 pub async fn find_with_hash(
     pool: &PgPool,
     username: &str,
@@ -68,7 +66,6 @@ pub async fn create_session(
     .await
 }
 
-/// The user behind a live (unexpired) session token.
 pub async fn user_for_session(pool: &PgPool, token_hash: &[u8]) -> sqlx::Result<Option<User>> {
     sqlx::query_as(
         "SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id
@@ -87,7 +84,6 @@ pub async fn delete_session(pool: &PgPool, token_hash: &[u8]) -> sqlx::Result<()
     Ok(())
 }
 
-/// Drop expired sessions. Run opportunistically on login.
 pub async fn purge_expired_sessions(pool: &PgPool) -> sqlx::Result<()> {
     sqlx::query("DELETE FROM sessions WHERE expires_at <= now()")
         .execute(pool)

@@ -2,10 +2,8 @@ import { api, auth } from './auth.svelte';
 import type { Carrier, CarrierEventRow } from './types/carrier';
 import type { MarketSnapshot } from './types/market';
 
-/** Connection state as shown in the status badge. */
 export type CarrierStatus = 'connecting' | 'connected' | 'OFFLINE';
 
-/** Exponential backoff for stream rebuilds. */
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
@@ -19,7 +17,6 @@ const RECONNECT_MAX_MS = 15000;
  */
 const PING_MS = 5000;
 
-/** Rows requested for the history table. */
 export const HISTORY_LIMIT = 20;
 
 /**
@@ -97,7 +94,6 @@ export function createCarrierFeed(initial: Carrier | null, callsign: string) {
 	function scheduleReconnect() {
 		if (reconnectTimer !== undefined) return;
 
-		// Exponential backoff, capped. attempt resets on a successful open.
 		const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS);
 		attempt++;
 
@@ -120,7 +116,6 @@ export function createCarrierFeed(initial: Carrier | null, callsign: string) {
 		if (!alive) {
 			if (status !== 'OFFLINE') {
 				status = 'OFFLINE';
-				// Drop the dead stream so it cannot linger; the probe reopens it.
 				source?.close();
 				source = undefined;
 				if (reconnectTimer !== undefined) {
@@ -131,7 +126,6 @@ export function createCarrierFeed(initial: Carrier | null, callsign: string) {
 			return;
 		}
 
-		// API is up again: rebuild the stream immediately.
 		if (!source) {
 			if (reconnectTimer !== undefined) {
 				clearTimeout(reconnectTimer);
@@ -149,12 +143,10 @@ export function createCarrierFeed(initial: Carrier | null, callsign: string) {
 			const res = await api(base);
 			if (res.ok) carrier = (await res.json()) as Carrier;
 		} catch {
-			// Offline; the stream or the next action retries.
 		}
 	}
 
 	function start() {
-		// Seed history from the load function's carrier before the first event.
 		if (carrier) void loadHistory();
 
 		connect();

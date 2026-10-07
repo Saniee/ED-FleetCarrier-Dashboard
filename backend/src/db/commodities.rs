@@ -10,8 +10,6 @@ use crate::journal_definitions::Commodity;
 /// rows are dropped rather than merged. The delete and the insert share the
 /// caller's transaction with the market header upsert, which is why this takes a
 /// connection rather than a pool.
-///
-/// This module owns `market_commodities` and nothing else.
 pub async fn replace(
     conn: &mut PgConnection,
     carrier_id: i64,

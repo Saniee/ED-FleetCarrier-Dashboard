@@ -56,7 +56,6 @@ async fn open(
         initial.push(Ok(carrier_event(snapshot)));
     }
 
-    // The market belongs to the carrier, and there may not be one yet.
     if let Some(carrier_id) = carrier_id_of(carrier.as_ref())
         && let Ok(Some(snapshot)) = market::snapshot(&state.db_pool, carrier_id).await
     {

@@ -17,13 +17,10 @@
 export const FLEET_CARRIER_MASS = 25000;
 export const SQUADRON_CARRIER_MASS = 15000;
 
-/** Fuel divisor from the formula. */
 const FUEL_DIVISOR = 200000;
 
-/** Flat fuel cost added to every jump. */
 const BASE_FUEL = 5;
 
-/** A carrier can never jump further than this, in light years. */
 export const MAX_JUMP_RANGE = 500;
 
 /**

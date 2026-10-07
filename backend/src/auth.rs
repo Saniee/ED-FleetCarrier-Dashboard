@@ -26,7 +26,6 @@ use crate::{
 pub const INGEST_HEADER: &str = "X-Ingest-Token";
 pub const SESSION_TTL_SECS: i64 = 7 * 24 * 60 * 60;
 
-/// A fresh random secret, hex encoded (256 bits).
 pub fn new_token() -> String {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
@@ -70,7 +69,6 @@ fn bearer(parts: &Parts) -> Option<&str> {
         .map(str::trim)
 }
 
-/// A logged-in dashboard user, from `Authorization: Bearer <session token>`.
 pub struct AuthUser(pub User);
 
 impl FromRequestParts<AppState> for AuthUser {
@@ -121,19 +119,15 @@ impl FromRequestParts<AppState> for Viewer {
     }
 }
 
-/// Who is posting to an ingest endpoint.
 #[derive(Clone, Copy, Debug)]
 pub enum Ingest {
-    /// A per-user API token.
     User(i64),
     /// The legacy shared `TOKEN`, or no auth at all when `TOKEN` is unset.
     Legacy,
 }
 
-/// What to do with an ingest request once its carrier is known.
 pub enum Access {
     Allow,
-    /// Accept the request but store nothing.
     Skip,
 }
 
@@ -199,7 +193,6 @@ impl FromRequestParts<AppState> for Ingest {
         }
 
         match (&state.legacy_token, presented) {
-            // Legacy token configured: it must match.
             (Some(expected), Some(got)) if constant_eq(expected, got) => Ok(Ingest::Legacy),
             (Some(_), _) => Err(StatusCode::UNAUTHORIZED),
             // No legacy token configured and nothing valid presented. A

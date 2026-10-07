@@ -58,7 +58,6 @@ pub async fn register(
     Ok((StatusCode::CREATED, Json(json!(user))))
 }
 
-/// Exchange credentials for a timed session token.
 pub async fn login(
     State(state): State<AppState>,
     Json(body): Json<Credentials>,

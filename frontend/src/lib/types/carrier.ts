@@ -26,7 +26,6 @@ export interface CrewMember {
 	CrewName: string | null;
 }
 
-/** One entry of `ship_packs` / `module_packs`. */
 export interface Pack {
 	PackTheme: string;
 	PackTier: number;
@@ -43,7 +42,6 @@ export interface TradeOrder {
 	SaleOrder?: number;
 }
 
-/** One entry of `station_economies`. */
 export interface StationEconomy {
 	Name: string;
 	Name_Localised: string | null;
@@ -162,7 +160,7 @@ export interface Carrier {
 
 /**
  * A row of `carrier_events` as returned by
- * `GET /api/carrier/{carrier_id}/events?limit=N`.
+ * `GET /api/carriers/{callsign}/events?limit=N`.
  *
  * `carrier` is null for events that could not be attributed to a carrier
  * (an on-foot `CarrierJump` whose system matched nothing).
@@ -175,12 +173,10 @@ export interface CarrierEventRow {
 	carrier: number | null;
 }
 
-/** A faction reference, e.g. `{ "Name": "The Dark Wheel" }`. */
 export interface Faction {
 	Name: string;
 }
 
-/** `CarrierStats.SpaceUsage`. */
 export interface SpaceUsage {
 	TotalCapacity: number;
 	Crew: number;
@@ -207,7 +203,6 @@ export interface Finance {
 	TaxRate_repair: number | null;
 }
 
-// ---------------------------------------------------------------------------
 // Journal events, as stored in `carrier_events.json_data`
 //
 // These mirror the backend's `CarrierEvent` enum: an internally tagged union on
@@ -215,7 +210,6 @@ export interface Finance {
 //   - optional fields are present as explicit `null`, never omitted;
 //   - unknown journal keys (CarrierType, and CarrierNameChange's malformed `""`)
 //     are dropped by the parser and do not appear here.
-// ---------------------------------------------------------------------------
 
 export interface CarrierJumpEvent {
 	event: 'CarrierJump';
@@ -408,7 +402,6 @@ export interface CarrierLocationEvent {
 	BodyID: number;
 }
 
-/** The raw journal event stored in `json_data`, discriminated on `event`. */
 export type CarrierEventJson =
 	| CarrierJumpEvent
 	| CarrierBuyEvent
@@ -426,10 +419,9 @@ export type CarrierEventJson =
 	| CarrierNameChangeEvent
 	| CarrierLocationEvent;
 
-/** Every event name the API can return in `event_name`. */
 export type CarrierEventName = CarrierEventJson['event'];
 
-/** One row of `GET /api/carriers` (and `/api/carriers/mine`, which adds `is_private`). */
+/** One row of `GET /api/carriers` (and `/api/carriers/mine`, which adds `visibility`). */
 export interface CarrierListItem {
 	carrier_id: number;
 	callsign: string | null;

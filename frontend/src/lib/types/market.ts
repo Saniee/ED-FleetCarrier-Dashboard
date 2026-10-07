@@ -13,7 +13,6 @@
  * rather than being omitted.
  */
 
-/** The header of the last `Market` event — a row of `carrier_markets`. */
 export interface MarketHeader {
 	carrier_id: number;
 	/** The raw `MarketID`; equal to `carrier_id` for a fleet carrier. */
@@ -27,7 +26,6 @@ export interface MarketHeader {
 	updated_at: string;
 }
 
-/** One commodity listed on the market — a row of `market_commodities`. */
 export interface Commodity {
 	carrier_id: number;
 	/** The journal's commodity id; unique within a market. */
@@ -52,7 +50,6 @@ export interface Commodity {
 	rare: boolean | null;
 }
 
-/** The `{ event, commodities }` payload sent on the stream and by the REST read. */
 export interface MarketSnapshot {
 	event: MarketHeader;
 	commodities: Commodity[];

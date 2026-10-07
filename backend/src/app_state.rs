@@ -17,10 +17,8 @@ pub type MarketSnapshot = Value;
 /// a subscriber that only cares about one can ignore the other.
 #[derive(Clone, Debug)]
 pub enum Update {
-    /// A carrier's table after an applied carrier event.
     /// (carrier_id, snapshot); the id lets per-carrier streams filter.
     Carrier(i64, CarrierSnapshot),
-    /// A carrier's market after an applied `Market` event.
     Market(i64, MarketSnapshot),
 }
 

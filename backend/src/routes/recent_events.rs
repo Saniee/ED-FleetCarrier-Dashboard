@@ -14,7 +14,6 @@ fn default_limit() -> i64 {
     10
 }
 
-/// Recent events for a carrier addressed by callsign.
 pub async fn get_events_by_callsign(
     Path(callsign): Path<String>,
     Query(q): Query<EventsQuery>,

@@ -23,7 +23,6 @@
   async function loadAll() {
     const [t, c] = await Promise.all([api('/api/auth/tokens'), api('/api/carriers/mine')]);
     if (t.status === 401 || c.status === 401) {
-      // Session expired or revoked server-side.
       await auth.logout();
       await goto('/login');
       return;

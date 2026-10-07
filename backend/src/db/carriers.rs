@@ -5,7 +5,6 @@ use crate::journal_definitions::{
     CarrierCrewServices, CarrierEvent, CarrierJump, CarrierTradeOrder, PackOrder,
 };
 
-/// The current carrier table serialized as JSON, as published to subscribers.
 pub type CarrierSnapshot = Value;
 
 /// Apply one journal event to the `carriers` state table.
@@ -40,7 +39,6 @@ pub async fn apply(pool: &PgPool, event: &CarrierEvent) -> sqlx::Result<Option<i
     }
 }
 
-/// Record which history row produced the current carrier state.
 pub async fn set_last_event(
     pool: &PgPool,
     carrier_id: i64,
@@ -57,7 +55,6 @@ pub async fn set_last_event(
     Ok(())
 }
 
-/// The full carrier row as JSON, for the API response.
 pub async fn get(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<CarrierSnapshot>> {
     sqlx::query_scalar("SELECT to_jsonb(c) FROM carriers c WHERE carrier_id = $1")
         .bind(carrier_id)
@@ -85,10 +82,6 @@ pub async fn ensure(pool: &PgPool, carrier_id: i64) -> sqlx::Result<()> {
 
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Identity / purchase / name
-// ---------------------------------------------------------------------------
 
 async fn upsert_buy(
     pool: &PgPool,
@@ -145,10 +138,6 @@ async fn upsert_name(
     .fetch_one(pool)
     .await
 }
-
-// ---------------------------------------------------------------------------
-// Stats block (identity, access, fuel, space, finance, collections)
-// ---------------------------------------------------------------------------
 
 async fn upsert_stats(
     pool: &PgPool,
@@ -217,10 +206,6 @@ async fn upsert_stats(
     .await
 }
 
-// ---------------------------------------------------------------------------
-// Jump scheduling
-// ---------------------------------------------------------------------------
-
 async fn upsert_jump_request(
     pool: &PgPool,
     e: &crate::journal_definitions::CarrierJumpRequest,
@@ -272,10 +257,6 @@ async fn cancel_jump(
     .fetch_optional(pool)
     .await
 }
-
-// ---------------------------------------------------------------------------
-// Money and fuel
-// ---------------------------------------------------------------------------
 
 async fn upsert_bank_transfer(
     pool: &PgPool,
@@ -355,10 +336,6 @@ async fn upsert_finance(
     .await
 }
 
-// ---------------------------------------------------------------------------
-// Access
-// ---------------------------------------------------------------------------
-
 async fn upsert_docking_access(
     pool: &PgPool,
     e: &crate::journal_definitions::CarrierDockingPermission,
@@ -380,10 +357,6 @@ async fn upsert_docking_access(
     .fetch_one(pool)
     .await
 }
-
-// ---------------------------------------------------------------------------
-// Location
-// ---------------------------------------------------------------------------
 
 async fn upsert_location(
     pool: &PgPool,
@@ -616,10 +589,6 @@ async fn apply_jump(pool: &PgPool, j: &CarrierJump) -> sqlx::Result<Option<i64>>
     }
 }
 
-// ---------------------------------------------------------------------------
-// Collections stored as jsonb
-// ---------------------------------------------------------------------------
-
 /// Read a jsonb column for a carrier, defaulting to the supplied value when the
 /// row is missing or the column is NULL.
 async fn read_jsonb(
@@ -641,7 +610,6 @@ async fn read_jsonb(
 
     match row {
         Some(Some(value)) => Ok((true, value)),
-        // Row exists but the column is NULL.
         Some(None) => Ok((true, default)),
         None => Ok((false, default)),
     }
@@ -784,11 +752,6 @@ async fn trade_order(pool: &PgPool, e: &CarrierTradeOrder) -> sqlx::Result<i64> 
     write_jsonb(pool, e.carrier_id, "trade_orders", &orders).await
 }
 
-// ---------------------------------------------------------------------------
-// Tenancy: ownership, privacy, lookup by callsign, discovery
-// ---------------------------------------------------------------------------
-
-/// Who owns a carrier row, as far as ingest authorisation is concerned.
 pub enum Ownership {
     /// No row: the carrier has never been seen.
     Missing,
@@ -888,7 +851,6 @@ pub async fn set_visibility(
     Ok(done.rows_affected() > 0)
 }
 
-/// Carriers owned by a user, whatever their visibility.
 pub async fn list_owned(pool: &PgPool, user_id: i64) -> sqlx::Result<Vec<Value>> {
     sqlx::query_scalar(
         "SELECT jsonb_build_object(

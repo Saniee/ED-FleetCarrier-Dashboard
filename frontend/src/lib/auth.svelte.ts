@@ -41,7 +41,6 @@ function store(next: Session | null) {
 	}
 }
 
-/** `fetch` with the session token attached and a JSON content type for bodies. */
 export function api(path: string, init: RequestInit = {}): Promise<Response> {
 	const headers = new Headers(init.headers);
 	if (session) headers.set('Authorization', `Bearer ${session.token}`);
@@ -51,7 +50,6 @@ export function api(path: string, init: RequestInit = {}): Promise<Response> {
 	return fetch(path, { ...init, headers });
 }
 
-/** An error message from a failed response. */
 async function failure(res: Response): Promise<string> {
 	const text = await res.text().catch(() => '');
 	return text || `Request failed (${res.status})`;

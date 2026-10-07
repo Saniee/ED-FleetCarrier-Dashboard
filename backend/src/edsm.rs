@@ -20,8 +20,6 @@ const BODIES_URL: &str = "https://www.edsm.net/api-system-v1/bodies";
 /// EDSM prefers to know who is calling.
 const USER_AGENT: &str = "ED-Commander-Site (personal fleet-carrier dashboard)";
 
-/// Build the shared client. One connection pool for the process; a lookup is far
-/// too rare to justify anything more elaborate.
 pub fn client() -> reqwest::Client {
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
@@ -38,10 +36,8 @@ struct SystemResponse {
     bodies: Option<Vec<SystemBody>>,
 }
 
-/// One body, reduced to the fields this project uses.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SystemBody {
-    /// The journal's `BodyID`.
     #[serde(rename = "bodyId")]
     pub body_id: i64,
     pub name: String,

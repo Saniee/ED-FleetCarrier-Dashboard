@@ -14,13 +14,10 @@
  */
 export const LOCALE = 'de-DE';
 
-/** Placeholder for values that are null/undefined/NaN. */
 const EMPTY = '—';
 
 export interface FormatTimestampOptions {
-	/** Render in UTC instead of the viewer's system timezone. */
 	utc?: boolean;
-	/** Include the zone name, e.g. "GMT+2". */
 	showZone?: boolean;
 }
 
@@ -62,7 +59,6 @@ export function formatTimestamp(
 	}).format(date);
 }
 
-/** Format a number with European grouping. Null/undefined/NaN render as "—". */
 export function formatNumber(
 	value: number | null | undefined,
 	options?: Intl.NumberFormatOptions,
@@ -71,12 +67,10 @@ export function formatNumber(
 	return new Intl.NumberFormat(LOCALE, options).format(value);
 }
 
-/** Format a credit balance as a plain grouped integer, e.g. `1.000.000.000`. */
 export function formatCredits(value: number | null | undefined): string {
 	return formatNumber(value, { maximumFractionDigits: 0 });
 }
 
-/** Format a decimal value (jump range, coordinates) with fixed precision. */
 export function formatDecimal(
 	value: number | null | undefined,
 	digits = 2,

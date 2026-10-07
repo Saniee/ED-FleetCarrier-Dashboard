@@ -15,12 +15,10 @@ function unwrapSymbol(symbol: string): string {
 		.replace(/_/g, ' ');
 }
 
-/** Display name for a commodity. */
 export function commodityName(c: Commodity): string {
 	return c.name_localised ?? unwrapSymbol(c.name);
 }
 
-/** Display name for a commodity's category, or an em dash when unknown. */
 export function commodityCategory(c: Commodity): string {
 	if (c.category_localised) return c.category_localised;
 	return c.category ? unwrapSymbol(c.category) : '—';
@@ -38,7 +36,6 @@ function orDash(value: number | null, format: (value: number) => string): string
 	return value ? format(value) : '—';
 }
 
-/** A price in credits, whichever side of the market it belongs to. */
 export function commodityPrice(value: number | null): string {
 	return orDash(value, formatCredits);
 }

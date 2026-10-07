@@ -9,8 +9,6 @@ use crate::journal_definitions::MarketEvent;
 /// Takes a connection rather than a pool so the caller can run this and
 /// `commodities::replace` inside one transaction: the header and the commodity
 /// list are two halves of the same snapshot and must never disagree.
-///
-/// This module owns `carrier_markets` and nothing else.
 pub async fn upsert(conn: &mut PgConnection, e: &MarketEvent) -> sqlx::Result<i64> {
     // For a fleet carrier the journal's `MarketID` equals its `CarrierID`, so the
     // same number keys both this row and the `carriers` row it hangs off.

@@ -53,7 +53,6 @@ pub struct ListQuery {
     page: i64,
     #[serde(default = "default_per_page")]
     per_page: i64,
-    /// Matches callsign, name or system.
     q: Option<String>,
 }
 
@@ -65,7 +64,6 @@ fn default_per_page() -> i64 {
     20
 }
 
-/// Paginated discovery list. Only `public` carriers are listed.
 pub async fn list(
     State(state): State<AppState>,
     Query(q): Query<ListQuery>,
@@ -128,7 +126,6 @@ pub async fn claim(
     }
 }
 
-/// Give up ownership.
 pub async fn release(
     Path(callsign): Path<String>,
     State(state): State<AppState>,
@@ -170,7 +167,6 @@ pub struct Settings {
     visibility: Visibility,
 }
 
-/// Owner-only settings (currently just the visibility).
 pub async fn update_settings(
     Path(callsign): Path<String>,
     State(state): State<AppState>,
@@ -187,7 +183,6 @@ pub async fn update_settings(
     }
 }
 
-/// Carriers owned by the logged-in user, whatever their visibility.
 pub async fn mine(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,

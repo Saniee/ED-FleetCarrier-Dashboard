@@ -19,7 +19,6 @@
     untrack(() => data.slug)
   );
 
-  // Ticks once a second, but only while a jump is actually pending.
   let now = $state(Date.now());
 
   // The scheduled jump is denormalized onto the carrier row, so this comes
@@ -67,7 +66,6 @@
   });
 
   onMount(() => {
-    // Nothing to stream for a carrier that is not there (or not visible).
     if (data.notFound) return;
     feed.start();
     return () => feed.stop();

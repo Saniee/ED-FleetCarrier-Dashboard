@@ -102,7 +102,6 @@ pub async fn post(
     ))
 }
 
-/// The current market for a carrier addressed by callsign.
 pub async fn get_by_callsign(
     Path(callsign): Path<String>,
     State(state): State<AppState>,

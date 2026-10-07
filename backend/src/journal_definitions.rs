@@ -84,7 +84,6 @@ carrier_event_accessors! {
     ],
 }
 
-/// Parse one raw journal line. `None` = not a known carrier event (or malformed).
 pub fn parse_carrier_event(line: &str) -> Option<CarrierEvent> {
     serde_json::from_str(line).ok()
 }
@@ -99,17 +98,12 @@ pub fn parse_market_event(line: &str) -> Option<MarketEvent> {
     (market.event == "Market").then_some(market)
 }
 
-// ---------------------------------------------------------------------------
-// Events
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct CarrierJump {
     #[serde(rename = "timestamp")]
     pub timestamp: String,
     pub docked: bool,
-    /// Present only on the on-foot variant of the event.
     pub on_foot: Option<bool>,
     // The station block is absent when the carrier jumps while the commander is
     // on foot in the destination system, so every one of these is optional.
@@ -350,10 +344,6 @@ pub struct CarrierLocation {
     pub body_id: i64,
 }
 
-// ---------------------------------------------------------------------------
-// Nested types
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct SpaceUsage {
@@ -421,11 +411,6 @@ pub struct Faction {
     pub name: String,
 }
 
-// ---------------------------------------------------------------------------
-// Market
-// ---------------------------------------------------------------------------
-
-/// The `StationType` a fleet carrier's market reports.
 pub const FLEET_CARRIER_STATION_TYPE: &str = "FleetCarrier";
 
 /// The `Market` journal event, as written to `Market.json`.
@@ -526,7 +511,6 @@ mod tests {
 
     const CARRIER_LOCATION: &str = r#"{ "timestamp":"2026-09-19T22:57:29Z", "event":"CarrierLocation", "CarrierType":"FleetCarrier", "CarrierID":3713341952, "StarSystem":"L 190-21", "SystemAddress":2621834266987, "BodyID":12 }"#;
 
-    // Docked jump: carries MarketID, which equals the CarrierID.
     const CARRIER_JUMP_DOCKED: &str = r#"{ "timestamp":"2026-09-20T14:58:12Z", "event":"CarrierJump", "Docked":true, "StationName":"KLJ-97Z", "StationType":"FleetCarrier", "MarketID":3713341952, "StationFaction":{ "Name":"FleetCarrier" }, "StationGovernment":"$government_Carrier;", "StationGovernment_Localised":"Private Ownership", "StationServices":[ "dock", "refuel" ], "StationEconomy":"$economy_Carrier;", "StationEconomy_Localised":"Private Enterprise", "StationEconomies":[ { "Name":"$economy_Carrier;", "Name_Localised":"Private Enterprise", "Proportion":1.000000 } ], "Taxi":false, "Multicrew":false, "StarSystem":"18 Camelopardalis", "SystemAddress":388434495835, "StarPos":[-57.93750,31.96875,-122.56250], "SystemAllegiance":"", "SystemEconomy":"$economy_None;", "SystemEconomy_Localised":"None", "SystemSecondEconomy":"$economy_None;", "SystemSecondEconomy_Localised":"None", "SystemGovernment":"$government_None;", "SystemGovernment_Localised":"None", "SystemSecurity":"$GAlAXY_MAP_INFO_state_anarchy;", "SystemSecurity_Localised":"Anarchy", "Population":0, "Body":"18 Camelopardalis A", "BodyID":2, "BodyType":"Star" }"#;
 
     // On-foot jump: no MarketID and no station block.
@@ -605,7 +589,6 @@ mod tests {
     // A carrier market exactly as `Market.json` writes it: header plus items.
     const MARKET_CARRIER: &str = r#"{ "timestamp":"2026-10-04T13:56:55Z", "event":"Market", "MarketID":3713341952, "StationName":"KLJ-97Z", "StationType":"FleetCarrier", "CarrierDockingAccess":"all", "StarSystem":"Pegasi Sector HX-T b3-0", "Items":[ { "id":129046165, "Name":"$iridium_name;", "Name_Localised":"Iridium", "Category":"$MARKET_category_metals;", "Category_Localised":"Metals", "BuyPrice":799015, "SellPrice":0, "MeanPrice":0, "StockBracket":0, "DemandBracket":0, "Stock":0, "Demand":0, "Consumer":false, "Producer":false, "Rare":false } ] }"#;
 
-    // The journal line for that same market: header only, no Items.
     const MARKET_JOURNAL_LINE: &str = r#"{ "timestamp":"2026-10-04T13:56:55Z", "event":"Market", "MarketID":3713341952, "StationName":"KLJ-97Z", "StationType":"FleetCarrier", "CarrierDockingAccess":"all", "StarSystem":"Pegasi Sector HX-T b3-0" }"#;
 
     // A regular station market, which ingest drops.
