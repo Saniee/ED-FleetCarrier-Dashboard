@@ -49,6 +49,8 @@
     <button id="btnClaim">Claim</button> <button id="btnRelease">Release</button>
     <select id="visibility"><option>public</option><option>private</option><option>owner_only</option></select>
     <button id="btnVisibility">Set visibility</button>
+    <label><input type="checkbox" id="isSquadron"> squadron</label>
+    <button id="btnSquadron">Set squadron</button>
   </div>
   <div class="row">Stream: <button id="btnStream">Open</button> <button id="btnStreamStop">Close</button> <span id="streamState">closed</span></div>
 </fieldset>
@@ -184,23 +186,56 @@ $('btnEvents').onclick = () => call('events', 'GET', `/api/carriers/${cs()}/even
 $('btnMarket').onclick = () => call('market', 'GET', `/api/carriers/${cs()}/market`, { auth: optAuth() });
 $('btnClaim').onclick = () => call('claim', 'POST', `/api/carriers/${cs()}/claim`, { auth: true });
 $('btnRelease').onclick = () => call('release', 'DELETE', `/api/carriers/${cs()}/claim`, { auth: true });
+$('btnSquadron').onclick = () => call('squadron', 'PATCH', `/api/carriers/${cs()}`, { auth: true, body: { is_squadron: $('isSquadron').checked } });
 $('btnVisibility').onclick = () => call('visibility', 'PATCH', `/api/carriers/${cs()}`, { auth: true, body: { visibility: $('visibility').value } });
 
 let es = null;
-function stopStream() { if (es) es.close(); es = null; $('streamState').textContent = 'closed'; }
+function stopStream() { if (es) es.abort(); es = null; $('streamState').textContent = 'closed'; }
 $('btnStreamStop').onclick = stopStream;
-$('btnStream').onclick = () => {
+$('btnStream').onclick = async () => {
   stopStream();
-  es = new EventSource(`/api/carriers/${cs()}/stream` + (session ? `?access_token=${encodeURIComponent(session.token)}` : ''));
+  const ctl = es = new AbortController();
   $('streamState').textContent = 'connecting...';
-  es.onopen = () => { $('streamState').textContent = 'open'; };
-  es.onerror = () => { $('streamState').textContent = 'error / reconnecting'; };
-  for (const name of ['carrier', 'market']) {
-    es.addEventListener(name, (e) => {
-      const line = `[${new Date().toLocaleTimeString()}] ${name}: ${e.data.slice(0, 300)}${e.data.length > 300 ? '...' : ''}\n`;
-      $('stream').textContent = line + $('stream').textContent;
+  try {
+    const res = await fetch(`/api/carriers/${cs()}/stream`, {
+      headers: session ? { Authorization: `Bearer ${session.token}` } : {},
+      signal: ctl.signal,
     });
+    if (!res.ok) throw new Error(res.status);
+    $('streamState').textContent = 'open';
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += value.replace(/
+?/g, '
+');
+      let i;
+      while ((i = buf.indexOf('
+
+')) !== -1) {
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        let name = 'message'; const data = [];
+        for (const l of block.split('
+')) {
+          if (l.startsWith('event:')) name = l.slice(6).trim();
+          else if (l.startsWith('data:')) data.push(l.slice(5).replace(/^ /, ''));
+        }
+        if (!data.length) continue;
+        const d = data.join('
+');
+        const line = `[${new Date().toLocaleTimeString()}] ${name}: ${d.slice(0, 300)}${d.length > 300 ? '...' : ''}
+`;
+        $('stream').textContent = line + $('stream').textContent;
+      }
+    }
+  } catch (e) {
+    if (ctl.signal.aborted) return;
+    $('streamState').textContent = 'error: ' + e.message;
+    return;
   }
+  if (!ctl.signal.aborted) $('streamState').textContent = 'closed by server';
 };
 
 $('btnSample').onclick = () => { $('body').value = JSON.stringify(SAMPLES[$('sample').value], null, 2); };

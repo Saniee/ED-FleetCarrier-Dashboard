@@ -53,12 +53,18 @@ export interface StationEconomy {
  * Every column except `carrier_id` and `updated_at` is nullable, because a
  * carrier's row is filled in gradually as different journal events arrive.
  */
+export type CarrierType = 'FleetCarrier' | 'SquadronCarrier' | (string & {});
+
 export interface Carrier {
 	// Identity
 	carrier_id: number;
 	callsign: string | null;
 	name: string | null;
 	market_id: number | null;
+	/** The journal's `CarrierType`: 'FleetCarrier' or 'SquadronCarrier'. */
+	carrier_type: CarrierType;
+	/** Owner's designation as a squadron carrier; unrelated to `carrier_type`. */
+	is_squadron: boolean;
 
 	// Purchase
 	variant: string | null;
@@ -208,8 +214,7 @@ export interface Finance {
 // These mirror the backend's `CarrierEvent` enum: an internally tagged union on
 // `event`. Two consequences of that round-trip:
 //   - optional fields are present as explicit `null`, never omitted;
-//   - unknown journal keys (CarrierType, and CarrierNameChange's malformed `""`)
-//     are dropped by the parser and do not appear here.
+//   - unknown journal keys (CarrierNameChange's malformed `""`) are dropped by the parser and do not appear here.
 
 export interface CarrierJumpEvent {
 	event: 'CarrierJump';
@@ -427,6 +432,8 @@ export interface CarrierListItem {
 	callsign: string | null;
 	name: string | null;
 	variant?: string | null;
+	carrier_type?: CarrierType;
+	is_squadron?: boolean;
 	star_system: string | null;
 	docked?: boolean | null;
 	docking_access?: string | null;

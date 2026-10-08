@@ -85,7 +85,7 @@ export const auth = {
 	get user(): User | null {
 		return session?.user ?? null;
 	},
-	/** The session token, for requests that cannot go through `api()` (EventSource). */
+	/** The session token, for requests that cannot go through `api()` (the event stream). */
 	get token(): string | null {
 		return session?.token ?? null;
 	},

@@ -48,6 +48,12 @@ pub async fn post(
             .map_err(internal)?;
     }
 
+    if let (Some(id), Some(carrier_type)) = (carrier_id, payload.carrier_type()) {
+        carriers::set_carrier_type(&state.db_pool, id, carrier_type)
+            .await
+            .map_err(internal)?;
+    }
+
     // Location events from anyone but the owner are flagged so clients can mark
     // the location as unconfirmed; the owner's own event clears the flag.
     if let (Some(id), true) = (carrier_id, is_visitor_event(&payload)) {

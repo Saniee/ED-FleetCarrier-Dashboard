@@ -23,12 +23,20 @@ const BASE_FUEL = 5;
 
 export const MAX_JUMP_RANGE = 500;
 
+/** A carrier the game itself reports as a Squadron Carrier. */
+export function isSquadronHull(carrierType: string | null | undefined): boolean {
+	return carrierType === 'SquadronCarrier';
+}
+
+/** Hull mass for a journal `CarrierType`; unknown types count as Fleet Carriers. */
+export function carrierMassFor(carrierType: string | null | undefined): number {
+	return isSquadronHull(carrierType) ? SQUADRON_CARRIER_MASS : FLEET_CARRIER_MASS;
+}
+
 /**
  * Tritium burned by one jump of `distance` light years.
  *
- * Defaults to a Fleet Carrier's mass. The journal does carry a `CarrierType`
- * field, but it is not stored yet, so a Squadron Carrier would need that value
- * passed in explicitly.
+ * Defaults to a Fleet Carrier's mass; pass `carrierMassFor(type)` for others.
  */
 export function fuelPerJump(
 	distance: number,

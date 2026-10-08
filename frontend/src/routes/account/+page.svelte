@@ -4,6 +4,7 @@
   import { auth, api } from '$lib/auth.svelte';
   import type { CarrierListItem } from '$lib/types/carrier';
   import { formatTimestamp } from '$lib/format';
+  import { isSquadronHull } from '$lib/carrier-fuel';
   import { VISIBILITIES, VISIBILITY_LABEL, type Visibility } from '$lib/visibility';
 
   interface ApiToken {
@@ -114,7 +115,7 @@
             {#each carriers as c (c.carrier_id)}
               <tr>
                 <td><a href={`/carrier/${encodeURIComponent(c.callsign ?? '')}`}>{c.callsign}</a></td>
-                <td>{c.name ?? '—'}</td>
+                <td>{c.name ?? '—'}{#if c.is_squadron || isSquadronHull(c.carrier_type)} <span class="muted">[Squadron]</span>{/if}</td>
                 <td>{c.star_system ?? '—'}</td>
                 <td>
                   <select

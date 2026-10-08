@@ -62,6 +62,20 @@ macro_rules! carrier_event_accessors {
 }
 
 
+impl CarrierEvent {
+    /// The journal's `CarrierType` (`FleetCarrier` / `SquadronCarrier`), on the
+    /// few events that carry it.
+    pub fn carrier_type(&self) -> Option<&str> {
+        match self {
+            Self::CarrierBuy(e) => e.carrier_type.as_deref(),
+            Self::CarrierStats(e) => e.carrier_type.as_deref(),
+            Self::CarrierFinance(e) => e.carrier_type.as_deref(),
+            Self::CarrierLocation(e) => e.carrier_type.as_deref(),
+            _ => None,
+        }
+    }
+}
+
 carrier_event_accessors! {
     with_id: [
         CarrierBuy,
@@ -159,6 +173,7 @@ pub struct CarrierBuy {
     pub price: i64,
     pub variant: String,
     pub callsign: String,
+    pub carrier_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -180,6 +195,7 @@ pub struct CarrierStats {
     pub crew: Vec<Crew>,
     pub ship_packs: Vec<Pack>,
     pub module_packs: Vec<Pack>,
+    pub carrier_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -256,6 +272,7 @@ pub struct CarrierFinance {
     pub reserve_balance: i64,
     pub available_balance: i64,
     pub reserve_percent: i64,
+    pub carrier_type: Option<String>,
     #[serde(rename = "TaxRate_shipyard")]
     pub tax_rate_shipyard: Option<i64>,
     #[serde(rename = "TaxRate_rearm")]
@@ -342,6 +359,7 @@ pub struct CarrierLocation {
     pub system_address: i64,
     #[serde(rename = "BodyID")]
     pub body_id: i64,
+    pub carrier_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

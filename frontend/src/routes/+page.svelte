@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import type { CarrierPage } from '$lib/types/carrier';
   import { formatTimestamp } from '$lib/format';
+  import { isSquadronHull } from '$lib/carrier-fuel';
 
   const PER_PAGE = 20;
 
@@ -79,7 +80,7 @@
           {#each result.items as c (c.carrier_id)}
             <tr>
               <td><a href={`/carrier/${encodeURIComponent(c.callsign ?? '')}`}>{c.callsign}</a></td>
-              <td>{c.name ?? '—'}</td>
+              <td>{c.name ?? '—'}{#if c.is_squadron || isSquadronHull(c.carrier_type)} <span class="muted">[Squadron]</span>{/if}</td>
               <td>{c.star_system ?? '—'}{#if c.location_unverified}*{/if}</td>
               <td>{c.docking_access ?? '—'}</td>
               <td>{formatTimestamp(c.updated_at)}</td>

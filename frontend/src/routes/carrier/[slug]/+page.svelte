@@ -6,7 +6,7 @@
   import { formatTimestamp, formatNumber, formatCountdown, parseTimestamp } from '$lib/format';
   import { auth, api } from '$lib/auth.svelte';
   import { VISIBILITIES, VISIBILITY_LABEL, type Visibility } from '$lib/visibility';
-  import { fuelPerJump, jumpsLeft, MAX_JUMP_RANGE } from '$lib/carrier-fuel';
+  import { carrierMassFor, isSquadronHull, fuelPerJump, jumpsLeft, MAX_JUMP_RANGE } from '$lib/carrier-fuel';
   import { commodityName, commodityCategory, commodityPrice, commodityQuantity, isTraded } from '$lib/commodity';
 
   let { data }: { data: PageData } = $props();
@@ -41,7 +41,7 @@
     if (!c || c.fuel_level === null) return null;
 
     const capacityUsed = Math.max(0, (c.space_total_capacity ?? 0) - (c.space_free ?? 0));
-    const perJump = fuelPerJump(MAX_JUMP_RANGE, capacityUsed, c.fuel_level);
+    const perJump = fuelPerJump(MAX_JUMP_RANGE, capacityUsed, c.fuel_level, carrierMassFor(c.carrier_type));
 
     return { perJump, left: jumpsLeft(c.fuel_level, perJump) };
   });
@@ -114,6 +114,7 @@
         <h1>
         {feed.carrier.name ?? 'unknown carrier'}
         <span class="callsign">{feed.carrier.callsign ?? '—'}</span>
+        {#if feed.carrier.is_squadron || isSquadronHull(feed.carrier.carrier_type)}<span class="muted">Squadron</span>{/if}
       </h1>
       <div>
         {#if claimable}
@@ -121,6 +122,15 @@
         {/if}
         {#if owner}
           <button onclick={() => act('DELETE', '/claim')}>Release</button>
+          <label>
+            <input
+              type="checkbox"
+              checked={feed.carrier?.is_squadron || isSquadronHull(feed.carrier?.carrier_type)}
+              disabled={isSquadronHull(feed.carrier?.carrier_type)}
+              onchange={(e) => act('PATCH', '', { is_squadron: e.currentTarget.checked })}
+            />
+            Squadron carrier
+          </label>
           <select
             value={feed.carrier?.visibility}
             onchange={(e) => act('PATCH', '', { visibility: e.currentTarget.value as Visibility })}

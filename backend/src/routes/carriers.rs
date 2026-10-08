@@ -164,7 +164,9 @@ impl Visibility {
 
 #[derive(Deserialize)]
 pub struct Settings {
-    visibility: Visibility,
+    visibility: Option<Visibility>,
+    /// Owner's designation of this carrier as their squadron's carrier.
+    is_squadron: Option<bool>,
 }
 
 pub async fn update_settings(
@@ -174,8 +176,14 @@ pub async fn update_settings(
     Json(body): Json<Settings>,
 ) -> Result<StatusCode, StatusCode> {
     let (carrier_id, _) = resolve(&state, &callsign).await?;
-    match carriers::set_visibility(&state.db_pool, carrier_id, user.id, body.visibility.as_str())
-        .await
+    match carriers::set_settings(
+        &state.db_pool,
+        carrier_id,
+        user.id,
+        body.visibility.map(Visibility::as_str),
+        body.is_squadron,
+    )
+    .await
         .map_err(internal)?
     {
         true => Ok(StatusCode::NO_CONTENT),

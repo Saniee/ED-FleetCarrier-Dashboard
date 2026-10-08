@@ -1,4 +1,5 @@
 import { api, auth } from './auth.svelte';
+import { openStream } from './sse';
 import type { Carrier, CarrierEventRow } from './types/carrier';
 import type { MarketSnapshot } from './types/market';
 
@@ -32,7 +33,7 @@ export function createCarrierFeed(initial: Carrier | null, callsign: string) {
 	let market = $state<MarketSnapshot | null>(null);
 	let status = $state<CarrierStatus>('connecting');
 
-	let source: EventSource | undefined;
+	let source: { close: () => void } | undefined;
 	let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	let pingTimer: ReturnType<typeof setInterval> | undefined;
 	let attempt = 0;
@@ -53,42 +54,28 @@ export function createCarrierFeed(initial: Carrier | null, callsign: string) {
 	}
 
 	function connect() {
-		// EventSource cannot send headers, so an owner_only carrier is opened with
-		// the session token in the query string.
-		const token = auth.token;
-		source = new EventSource(
-			token ? `${base}/stream?access_token=${encodeURIComponent(token)}` : `${base}/stream`
-		);
-
-		source.onopen = () => {
-			attempt = 0;
-			status = 'connected';
-		};
-
-		source.addEventListener('carrier', (e) => {
-			const next = JSON.parse((e as MessageEvent).data) as Carrier;
-			carrier = next;
-			void loadHistory();
+		source = openStream(`${base}/stream`, auth.token, {
+			onopen: () => {
+				attempt = 0;
+				status = 'connected';
+			},
+			onmessage: (event, data) => {
+				if (event === 'carrier') {
+					carrier = JSON.parse(data) as Carrier;
+					void loadHistory();
+				} else if (event === 'market') {
+					// The market arrives whole — header plus commodities — on the same
+					// connection, both when a Market event is ingested and on subscribe,
+					// so there is no separate fetch to keep in step.
+					market = JSON.parse(data) as MarketSnapshot;
+				}
+			},
+			onclose: () => {
+				source = undefined;
+				status = 'OFFLINE';
+				scheduleReconnect();
+			}
 		});
-
-		// The market arrives whole — header plus commodities — on the same
-		// connection, both when a Market event is ingested and on subscribe, so
-		// there is no separate fetch to keep in step.
-		source.addEventListener('market', (e) => {
-			market = JSON.parse((e as MessageEvent).data) as MarketSnapshot;
-		});
-
-		source.onerror = () => {
-			// The browser retries on its own while CONNECTING. A CLOSED stream is
-			// the case it gives up on — an error response, e.g. the proxy's 500
-			// when the backend is down, since that isn't text/event-stream.
-			if (source?.readyState !== EventSource.CLOSED) return;
-
-			source.close();
-			source = undefined;
-			status = 'OFFLINE';
-			scheduleReconnect();
-		};
 	}
 
 	function scheduleReconnect() {

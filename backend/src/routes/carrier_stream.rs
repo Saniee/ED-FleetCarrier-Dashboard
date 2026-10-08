@@ -18,8 +18,8 @@ use crate::{
 use super::{carriers::resolve_visible, market};
 
 /// Server-sent stream for one carrier, addressed by callsign. Authorised like
-/// the other reads; EventSource cannot send headers, so a session token may be
-/// passed as `?access_token=`.
+/// the other reads, via the `Authorization` header (the frontend reads the
+/// stream with `fetch`, since `EventSource` cannot send headers).
 pub async fn stream_by_callsign(
     Path(callsign): Path<String>,
     State(state): State<AppState>,
@@ -38,7 +38,7 @@ pub async fn stream_by_callsign(
 /// A new subscriber is sent the carrier and its market immediately, then a
 /// fresh snapshot of whichever changed after every applied event. Two named
 /// events travel this one connection — `carrier` and `market` — so the frontend
-/// needs a single `EventSource`. `only` restricts updates to one carrier.
+/// needs a single connection. `only` restricts updates to one carrier.
 ///
 /// Visibility is checked once, when the stream opens; a carrier switched to
 /// `owner_only` afterwards keeps feeding streams that were already open.

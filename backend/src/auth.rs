@@ -86,33 +86,19 @@ impl FromRequestParts<AppState> for AuthUser {
 
 /// The logged-in user if the request carries a valid session, else `None`.
 /// Never rejects for a missing or bad token: anonymous viewers are normal on
-/// public pages.
-///
-/// `EventSource` cannot set headers, so the `/stream` routes also accept the
-/// session token as an `access_token` query parameter.
+/// public pages. The token is accepted only in the `Authorization` header,
+/// never in the URL, where it would leak into logs.
 pub struct Viewer(pub Option<User>);
 
 impl FromRequestParts<AppState> for Viewer {
     type Rejection = StatusCode;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, StatusCode> {
-        let token = bearer(parts).map(str::to_owned).or_else(|| {
-            if !parts.uri.path().ends_with("/stream") {
-                return None;
-            }
-            parts
-                .uri
-                .query()?
-                .split('&')
-                .find_map(|pair| pair.strip_prefix("access_token="))
-                .map(str::to_owned)
-        });
-
-        let Some(token) = token else {
+        let Some(token) = bearer(parts) else {
             return Ok(Viewer(None));
         };
 
-        let user = users::user_for_session(&state.db_pool, &hash_token(&token))
+        let user = users::user_for_session(&state.db_pool, &hash_token(token))
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         Ok(Viewer(user))

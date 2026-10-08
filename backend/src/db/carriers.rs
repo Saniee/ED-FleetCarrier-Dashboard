@@ -39,6 +39,20 @@ pub async fn apply(pool: &PgPool, event: &CarrierEvent) -> sqlx::Result<Option<i
     }
 }
 
+pub async fn set_carrier_type(
+    pool: &PgPool,
+    carrier_id: i64,
+    carrier_type: &str,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE carriers SET carrier_type = $2 WHERE carrier_id = $1")
+        .bind(carrier_id)
+        .bind(carrier_type)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
 pub async fn set_last_event(
     pool: &PgPool,
     carrier_id: i64,
@@ -832,20 +846,26 @@ pub async fn release(pool: &PgPool, carrier_id: i64, user_id: i64) -> sqlx::Resu
     Ok(done.rows_affected() > 0)
 }
 
-/// Set the visibility (`public`, `private` or `owner_only`). `false` when
-/// `user_id` does not own the carrier.
-pub async fn set_visibility(
+/// Update the owner's settings; `None` leaves a setting as it is. `visibility`
+/// is `public`, `private` or `owner_only`. `false` when `user_id` does not own
+/// the carrier.
+pub async fn set_settings(
     pool: &PgPool,
     carrier_id: i64,
     user_id: i64,
-    visibility: &str,
+    visibility: Option<&str>,
+    is_squadron: Option<bool>,
 ) -> sqlx::Result<bool> {
     let done = sqlx::query(
-        "UPDATE carriers SET visibility = $3 WHERE carrier_id = $1 AND owner_id = $2",
+        "UPDATE carriers
+         SET visibility = COALESCE($3, visibility),
+             is_squadron = COALESCE($4, is_squadron)
+         WHERE carrier_id = $1 AND owner_id = $2",
     )
     .bind(carrier_id)
     .bind(user_id)
     .bind(visibility)
+    .bind(is_squadron)
     .execute(pool)
     .await?;
     Ok(done.rows_affected() > 0)
@@ -855,7 +875,8 @@ pub async fn list_owned(pool: &PgPool, user_id: i64) -> sqlx::Result<Vec<Value>>
     sqlx::query_scalar(
         "SELECT jsonb_build_object(
              'carrier_id', carrier_id, 'callsign', callsign, 'name', name,
-             'star_system', star_system, 'visibility', visibility, 'updated_at', updated_at)
+             'star_system', star_system, 'visibility', visibility,
+             'carrier_type', carrier_type, 'is_squadron', is_squadron, 'updated_at', updated_at)
          FROM carriers WHERE owner_id = $1 ORDER BY updated_at DESC",
     )
     .bind(user_id)
@@ -893,7 +914,8 @@ pub async fn list_public(
     let items = sqlx::query_scalar(
         "SELECT jsonb_build_object(
              'carrier_id', carrier_id, 'callsign', callsign, 'name', name,
-             'variant', variant, 'star_system', star_system, 'docked', docked,
+             'variant', variant, 'carrier_type', carrier_type, 'is_squadron', is_squadron,
+             'star_system', star_system, 'docked', docked,
              'docking_access', docking_access, 'location_unverified', location_unverified,
              'updated_at', updated_at)
          FROM carriers
