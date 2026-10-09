@@ -3,12 +3,8 @@ use sqlx::{PgConnection, PgPool};
 
 use crate::journal_definitions::MarketEvent;
 
-/// Upsert the header of a carrier's market — the `event` half of a `Market`
-/// payload.
-///
-/// Takes a connection rather than a pool so the caller can run this and
-/// `commodities::replace` inside one transaction: the header and the commodity
-/// list are two halves of the same snapshot and must never disagree.
+/// Upsert the header of a carrier's market. Takes a connection so it runs in one
+/// transaction with `commodities::replace`.
 pub async fn upsert(conn: &mut PgConnection, e: &MarketEvent) -> sqlx::Result<i64> {
     // For a fleet carrier the journal's `MarketID` equals its `CarrierID`, so the
     // same number keys both this row and the `carriers` row it hangs off.

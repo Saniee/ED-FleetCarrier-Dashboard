@@ -1,21 +1,9 @@
 import type { Visibility } from '../visibility';
 
 /**
- * Types for the carrier API.
- *
- * The API serializes each row with Postgres `to_jsonb(carriers)`, which shapes
- * the JSON in ways worth knowing:
- *
- *  - keys are the snake_case column names, exactly as in the DB;
- *  - nullable columns are present as `null`, they are NOT omitted — so these
- *    are `| null`, not optional `?`;
- *  - `bigint` columns arrive as JSON numbers (safe here: Elite IDs and system
- *    addresses stay well under `Number.MAX_SAFE_INTEGER`);
- *  - `updated_at` is an ISO-8601 string with an offset, e.g.
- *    `"2026-09-28T16:51:08.077942+00:00"`;
- *  - `text[]` becomes a JSON array of strings;
- *  - jsonb collections keep the journal's PascalCase keys, because they are
- *    stored from the parsed event structs rather than re-mapped.
+ * Types for the carrier API. Rows come from Postgres `to_jsonb`: keys are the
+ * snake_case column names, nullable columns are `null` (not omitted), bigints are
+ * plain numbers, and jsonb collections keep the journal's PascalCase keys.
  */
 
 /** One entry of `crew`. Only activated roles carry `Enabled` / `CrewName`. */
@@ -32,8 +20,8 @@ export interface Pack {
 }
 
 /**
- * One entry of `trade_orders`, keyed by commodity (e.g. `"iridium"`).
- * A purchase order sets `PurchaseOrder`, a sale order sets `SaleOrder`.
+ * One entry of `trade_orders`, keyed by commodity (e.g. `"iridium"`); sets
+ * `PurchaseOrder` or `SaleOrder`.
  */
 export interface TradeOrder {
 	Price?: number;
@@ -49,9 +37,8 @@ export interface StationEconomy {
 }
 
 /**
- * A row of the `carriers` table — one fleet carrier's latest known state.
- * Every column except `carrier_id` and `updated_at` is nullable, because a
- * carrier's row is filled in gradually as different journal events arrive.
+ * A row of `carriers`: one carrier's latest state. Everything but `carrier_id`
+ * and `updated_at` is nullable, since rows fill in as events arrive.
  */
 export type CarrierType = 'FleetCarrier' | 'SquadronCarrier' | (string & {});
 
@@ -165,11 +152,8 @@ export interface Carrier {
 }
 
 /**
- * A row of `carrier_events` as returned by
- * `GET /api/carriers/{callsign}/events?limit=N`.
- *
- * `carrier` is null for events that could not be attributed to a carrier
- * (an on-foot `CarrierJump` whose system matched nothing).
+ * A row of `carrier_events` from `GET /api/carriers/{callsign}/events`; `carrier`
+ * is null for events that couldn't be attributed (an on-foot `CarrierJump`).
  */
 export interface CarrierEventRow {
 	id: number;
@@ -193,10 +177,7 @@ export interface SpaceUsage {
 	FreeSpace: number;
 }
 
-/**
- * `CarrierStats.Finance`. The early report after purchase carries only the
- * three balances, so the rest are nullable.
- */
+/** `CarrierStats.Finance`; the early post-purchase report has only the three balances. */
 export interface Finance {
 	CarrierBalance: number;
 	ReserveBalance: number;
@@ -209,12 +190,9 @@ export interface Finance {
 	TaxRate_repair: number | null;
 }
 
-// Journal events, as stored in `carrier_events.json_data`
-//
-// These mirror the backend's `CarrierEvent` enum: an internally tagged union on
-// `event`. Two consequences of that round-trip:
-//   - optional fields are present as explicit `null`, never omitted;
-//   - unknown journal keys (CarrierNameChange's malformed `""`) are dropped by the parser and do not appear here.
+// Journal events as stored in `carrier_events.json_data`, mirroring the backend's
+// `CarrierEvent` enum (tagged on `event`). Optional fields are explicit `null`,
+// and unknown journal keys are dropped.
 
 export interface CarrierJumpEvent {
 	event: 'CarrierJump';

@@ -1,8 +1,6 @@
-//! Credentials and request authentication.
-//!
-//! Two kinds of bearer secret exist, both random and stored only as a SHA-256:
-//! a *session token* (dashboard, expires) and an *API token* (EDMC plugin,
-//! revocable, sent in `X-Ingest-Token`).
+//! Credentials and request authentication. Session tokens (dashboard, expiring)
+//! and API tokens (EDMC plugin, revocable, `X-Ingest-Token`) are random and
+//! stored only as a SHA-256.
 
 use argon2::{
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
@@ -17,6 +15,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     app_state::AppState,
+    error::internal,
     db::{
         carriers::Ownership,
         users::{self, User},
@@ -45,8 +44,8 @@ pub async fn hash_password(password: String) -> Result<String, StatusCode> {
             .map(|h| h.to_string())
     })
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    .map_err(internal)?
+    .map_err(internal)
 }
 
 pub async fn verify_password(password: String, hash: String) -> bool {
@@ -78,16 +77,14 @@ impl FromRequestParts<AppState> for AuthUser {
         let token = bearer(parts).ok_or(StatusCode::UNAUTHORIZED)?;
         users::user_for_session(&state.db_pool, &hash_token(token))
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map_err(internal)?
             .map(AuthUser)
             .ok_or(StatusCode::UNAUTHORIZED)
     }
 }
 
-/// The logged-in user if the request carries a valid session, else `None`.
-/// Never rejects for a missing or bad token: anonymous viewers are normal on
-/// public pages. The token is accepted only in the `Authorization` header,
-/// never in the URL, where it would leak into logs.
+/// The logged-in user, or `None`: anonymous viewers are normal on public pages,
+/// so this never rejects. The token is read from the `Authorization` header only.
 pub struct Viewer(pub Option<User>);
 
 impl FromRequestParts<AppState> for Viewer {
@@ -100,7 +97,7 @@ impl FromRequestParts<AppState> for Viewer {
 
         let user = users::user_for_session(&state.db_pool, &hash_token(token))
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(internal)?;
         Ok(Viewer(user))
     }
 }
@@ -108,7 +105,7 @@ impl FromRequestParts<AppState> for Viewer {
 #[derive(Clone, Copy, Debug)]
 pub enum Ingest {
     User(i64),
-    /// The legacy shared `TOKEN`, or no auth at all when `TOKEN` is unset.
+    /// The legacy shared `TOKEN`, or no auth at all with `ALLOW_ANON_INGEST`.
     Legacy,
 }
 
@@ -118,17 +115,11 @@ pub enum Access {
 }
 
 impl Ingest {
-    /// Decide whether this caller may write to `carrier_id`.
-    ///
-    /// `visitor` marks events anyone docked at a carrier can generate, not just
-    /// its owner (`CarrierJump`, `CarrierLocation`, `Market`). Any user may
-    /// submit those for any carrier already in the database: more reporters keep
-    /// the data fresher. A carrier we have never seen is skipped, not created.
-    /// Owner-only management events are stored unless another user owns the
-    /// carrier, which is a 403. An event that cannot be attributed to a carrier
-    /// (an on-foot `CarrierJump`) is skipped: attributing it means guessing by
-    /// system, which is not safe with several tenants. The legacy token keeps
-    /// full access.
+    /// Decide whether this caller may write to `carrier_id`. `visitor` events
+    /// (`CarrierJump`, `CarrierLocation`, `Market`) can come from anyone docked at
+    /// the carrier, so any user may report them for an existing carrier but never
+    /// create one. Other events are owner-only (403 if another user owns it),
+    /// events with no carrier are skipped, and the legacy token keeps full access.
     pub async fn check(
         self,
         pool: &sqlx::PgPool,
@@ -144,7 +135,7 @@ impl Ingest {
 
         let ownership = crate::db::carriers::ownership(pool, carrier_id)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(internal)?;
 
         match (ownership, visitor) {
             (Ownership::Owned(owner), _) if owner == user_id => Ok(Access::Allow),
@@ -172,7 +163,7 @@ impl FromRequestParts<AppState> for Ingest {
         if let Some(token) = presented {
             let found = users::user_for_api_token(&state.db_pool, &hash_token(token))
                 .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                .map_err(internal)?;
             if let Some(user_id) = found {
                 return Ok(Ingest::User(user_id));
             }
@@ -181,11 +172,10 @@ impl FromRequestParts<AppState> for Ingest {
         match (&state.legacy_token, presented) {
             (Some(expected), Some(got)) if constant_eq(expected, got) => Ok(Ingest::Legacy),
             (Some(_), _) => Err(StatusCode::UNAUTHORIZED),
-            // No legacy token configured and nothing valid presented. A
-            // presented-but-unknown token is still a failure; only a request
-            // with no token at all falls through to the dev-mode open ingest.
-            (None, Some(_)) => Err(StatusCode::UNAUTHORIZED),
-            (None, None) => Ok(Ingest::Legacy),
+            // No legacy token configured. Only a request with no token at all,
+            // and only with `ALLOW_ANON_INGEST` on, falls through to open ingest.
+            (None, None) if state.anon_ingest => Ok(Ingest::Legacy),
+            (None, _) => Err(StatusCode::UNAUTHORIZED),
         }
     }
 }

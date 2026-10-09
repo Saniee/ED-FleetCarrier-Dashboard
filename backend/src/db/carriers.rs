@@ -7,12 +7,9 @@ use crate::journal_definitions::{
 
 pub type CarrierSnapshot = Value;
 
-/// Apply one journal event to the `carriers` state table.
-///
-/// This module owns the `carriers` table exclusively; it never touches
-/// `carrier_events`. Returns the `carrier_id` that was written, or `None` when
-/// the event could not be attributed to a carrier (an on-foot `CarrierJump`
-/// whose system does not match any known carrier).
+/// Apply one journal event to the `carriers` table. Returns the written
+/// `carrier_id`, or `None` when the event can't be attributed to a carrier (an
+/// on-foot `CarrierJump` matching no known system).
 pub async fn apply(pool: &PgPool, event: &CarrierEvent) -> sqlx::Result<Option<i64>> {
     match event {
         CarrierEvent::CarrierBuy(e) => upsert_buy(pool, e).await.map(Some),
@@ -76,12 +73,8 @@ pub async fn get(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<CarrierS
         .await
 }
 
-/// Make sure a `carriers` row exists for `carrier_id`, creating a bare one if not.
-///
-/// A carrier's market can be the first thing we ever see for it, and
-/// `carrier_markets.carrier_id` is a foreign key onto `carriers`, so the row has
-/// to exist before a market can be stored. `DO NOTHING` leaves a carrier that
-/// already has a full row from CarrierBuy / CarrierStats untouched.
+/// Create a bare `carriers` row if none exists. A market can be the first thing
+/// seen for a carrier, and `carrier_markets` has a foreign key onto it.
 pub async fn ensure(pool: &PgPool, carrier_id: i64) -> sqlx::Result<()> {
     sqlx::query(
         "
@@ -413,12 +406,8 @@ async fn upsert_location(
     .await
 }
 
-/// Set the resolved body name for a carrier, or clear it when the name could not
-/// be resolved.
-///
-/// Kept separate from `upsert_location` because the name comes from a lookup
-/// rather than the event. `updated_at` is deliberately left alone: this is a
-/// detail filled in behind an event, not an event of its own.
+/// Set the resolved body name, or clear it. Separate from `upsert_location`
+/// because the name comes from a lookup; leaves `updated_at` alone.
 pub async fn set_body(
     pool: &PgPool,
     carrier_id: i64,
@@ -435,14 +424,9 @@ pub async fn set_body(
     Ok(())
 }
 
-/// `CarrierJump` arrives in two shapes:
-///
-/// * docked — carries `MarketID` (equal to the carrier's `CarrierID`) and the
-///   full station block. Identified directly and upserted.
-/// * on foot — omits `MarketID` and the station block. It is attributed to the
-///   carrier whose current `system_address` matches. This assumes at most one
-///   tracked carrier sits in a given system; a multi-carrier deployment sharing
-///   a system would need a stronger link.
+/// `CarrierJump` arrives docked (with `MarketID`, equal to `CarrierID`) or on
+/// foot (without). An on-foot jump is attributed to the carrier whose
+/// `system_address` matches, which assumes one tracked carrier per system.
 async fn apply_jump(pool: &PgPool, j: &CarrierJump) -> sqlx::Result<Option<i64>> {
     let star_x = j.star_pos.first().copied();
     let star_y = j.star_pos.get(1).copied();
@@ -884,10 +868,8 @@ pub async fn list_owned(pool: &PgPool, user_id: i64) -> sqlx::Result<Vec<Value>>
     .await
 }
 
-/// One page of publicly discoverable carriers, most recently active first,
-/// plus the total count. Only `public` carriers with a callsign are listed (one
-/// without a callsign has no link to share yet). `search` matches callsign, name
-/// or system.
+/// One page of public carriers with a callsign, most recently active first, plus
+/// the total count. `search` matches callsign, name or system.
 pub async fn list_public(
     pool: &PgPool,
     search: Option<&str>,

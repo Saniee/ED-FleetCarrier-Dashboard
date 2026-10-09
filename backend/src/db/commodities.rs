@@ -3,13 +3,9 @@ use sqlx::{PgConnection, PgPool, QueryBuilder};
 
 use crate::journal_definitions::Commodity;
 
-/// Replace every commodity listed on a carrier's market — the `commodities` half
-/// of a `Market` payload.
-///
-/// A `Market` event is a full snapshot of the market, not a delta, so the old
-/// rows are dropped rather than merged. The delete and the insert share the
-/// caller's transaction with the market header upsert, which is why this takes a
-/// connection rather than a pool.
+/// Replace every commodity on a carrier's market. A `Market` event is a full
+/// snapshot, so old rows are dropped; takes a connection to share the header's
+/// transaction.
 pub async fn replace(
     conn: &mut PgConnection,
     carrier_id: i64,

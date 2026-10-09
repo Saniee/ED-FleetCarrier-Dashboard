@@ -128,10 +128,15 @@ pub async fn delete_api_token(pool: &PgPool, user_id: i64, id: i64) -> sqlx::Res
     Ok(done.rows_affected() > 0)
 }
 
-/// Resolve an ingest token to its owner, stamping `last_used_at`.
+/// Resolve an ingest token to its owner. `last_used_at` is stamped at most once
+/// a minute, so a busy plugin does not turn every event into a row write.
 pub async fn user_for_api_token(pool: &PgPool, token_hash: &[u8]) -> sqlx::Result<Option<i64>> {
     sqlx::query_scalar(
-        "UPDATE api_tokens SET last_used_at = now() WHERE token_hash = $1 RETURNING user_id",
+        "WITH t AS (SELECT id, user_id FROM api_tokens WHERE token_hash = $1),
+              u AS (UPDATE api_tokens SET last_used_at = now()
+                    WHERE id IN (SELECT id FROM t)
+                      AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute'))
+         SELECT user_id FROM t",
     )
     .bind(token_hash)
     .fetch_optional(pool)

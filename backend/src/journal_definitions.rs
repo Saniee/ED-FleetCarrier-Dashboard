@@ -46,11 +46,9 @@ macro_rules! carrier_event_accessors {
                 }
             }
 
-            /// The carrier this event belongs to.
-            ///
-            /// `CarrierJump` carries no `CarrierID`, but for fleet carriers the
-            /// station `MarketID` equals the `CarrierID`. The on-foot variant
-            /// omits `MarketID` entirely and returns `None`.
+            /// The carrier this event belongs to. `CarrierJump` has no `CarrierID`,
+            /// but a fleet carrier's station `MarketID` equals it; the on-foot
+            /// variant omits both and returns `None`.
             pub fn carrier_id(&self) -> Option<i64> {
                 match self {
                     $(Self::$with_id(e) => Some(e.carrier_id),)+
@@ -102,11 +100,9 @@ pub fn parse_carrier_event(line: &str) -> Option<CarrierEvent> {
     serde_json::from_str(line).ok()
 }
 
-/// Parse one raw `Market` line, or a whole `Market.json` document.
-///
-/// `None` = malformed, or an event that is not `Market`. Markets are not part of
-/// `CarrierEvent`: the event fires for every station the commander docks at, and
-/// a market is its own domain rather than a carrier state change.
+/// Parse one raw `Market` line or a whole `Market.json`; `None` if malformed or
+/// not `Market`. Markets aren't part of `CarrierEvent`: the event fires for every
+/// station the commander docks at.
 pub fn parse_market_event(line: &str) -> Option<MarketEvent> {
     let market: MarketEvent = serde_json::from_str(line).ok()?;
     (market.event == "Market").then_some(market)
@@ -156,7 +152,6 @@ pub struct CarrierJump {
     #[serde(rename = "BodyID")]
     pub body_id: i64,
     pub body_type: String,
-    /// Absent on some docked jumps.
     pub system_faction: Option<Faction>,
 }
 
@@ -431,12 +426,8 @@ pub struct Faction {
 
 pub const FLEET_CARRIER_STATION_TYPE: &str = "FleetCarrier";
 
-/// The `Market` journal event, as written to `Market.json`.
-///
-/// The journal line carries only the header; the commodity list lives in
-/// `Market.json`, which repeats the header and adds `Items`. The ingest plugin
-/// merges the two, so this is the whole payload either way — and it splits
-/// cleanly into the event header and the commodities it lists.
+/// The `Market` event as written to `Market.json`: the journal line has only the
+/// header, `Market.json` adds `Items`, and the plugin merges the two.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct MarketEvent {
@@ -457,8 +448,6 @@ pub struct MarketEvent {
 }
 
 impl MarketEvent {
-    /// Whether this market belongs to a fleet carrier.
-    ///
     /// The journal emits `Market` for every station; only the carrier's own
     /// market is tracked, so ingest drops anything else.
     pub fn is_fleet_carrier(&self) -> bool {

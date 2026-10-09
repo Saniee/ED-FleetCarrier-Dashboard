@@ -1,13 +1,6 @@
-//! EDSM lookups.
-//!
-//! The only thing this project needs from EDSM is a body's name: `CarrierLocation`
-//! carries a `BodyID` and nothing else. EDSM's system endpoint returns every body
-//! keyed by that same `BodyID`, which is why it is the source and Spansh is not —
-//! Spansh only exposes 64-bit body ids, so it cannot be keyed by the journal's.
-//!
-//! Every call is a whole system, so the caller is expected to cache the result
-//! (`db::body_names`). At one call per new system this is nowhere near a rate
-//! limit worth worrying about.
+//! EDSM lookups, used only for a body's name: `CarrierLocation` carries just a
+//! `BodyID`, which EDSM keys bodies by (Spansh only has 64-bit ids). A call
+//! returns a whole system, so callers cache it in `db::body_names`.
 
 use std::time::Duration;
 
@@ -46,10 +39,8 @@ pub struct SystemBody {
     pub body_type: Option<String>,
 }
 
-/// Every body EDSM knows for a system.
-///
-/// An unexplored system is not an error: EDSM answers `{}` and this returns an
-/// empty list, which the caller records as a miss so it is not asked again.
+/// Every body EDSM knows for a system. An unexplored system answers `{}` and
+/// yields an empty list, which the caller records as a miss.
 pub async fn fetch_bodies(
     client: &reqwest::Client,
     system_address: i64,

@@ -8,8 +8,17 @@ mod journal_definitions;
 mod app_state;
 mod auth;
 mod edsm;
+mod error;
 
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
+fn env_flag(name: &str, default: bool) -> bool {
+    match std::env::var(name).map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        Ok("1" | "true" | "yes" | "on") => true,
+        Ok("0" | "false" | "no" | "off") => false,
+        _ => default,
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -27,14 +36,25 @@ async fn main() {
         http: edsm::client(),
         tx,
         legacy_token: std::env::var("TOKEN").ok().filter(|t| !t.trim().is_empty()),
+        anon_ingest: env_flag("ALLOW_ANON_INGEST", false),
+        registration_open: env_flag("ALLOW_REGISTRATION", true),
+        rate_limit: env_flag("RATE_LIMIT", true),
     };
 
-    if state.legacy_token.is_none() {
-        eprintln!("WARNING: TOKEN is not set; token-less ingest requests are accepted.");
+    if state.anon_ingest {
+        eprintln!("WARNING: ALLOW_ANON_INGEST is set; ingest accepts requests with no token. Dev only.");
+    }
+    if !state.registration_open {
+        println!("Registration is closed.");
     }
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
     println!("Backend UP! Listening at 0.0.0.0:8080");
 
-    axum::serve(listener, router(state)).await.unwrap();
+    axum::serve(
+        listener,
+        router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }

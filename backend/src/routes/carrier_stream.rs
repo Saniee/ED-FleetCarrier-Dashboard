@@ -35,13 +35,10 @@ pub async fn stream_by_callsign(
     Ok(open(state, carrier, Some(carrier_id)).await)
 }
 
-/// A new subscriber is sent the carrier and its market immediately, then a
-/// fresh snapshot of whichever changed after every applied event. Two named
-/// events travel this one connection — `carrier` and `market` — so the frontend
-/// needs a single connection. `only` restricts updates to one carrier.
-///
-/// Visibility is checked once, when the stream opens; a carrier switched to
-/// `owner_only` afterwards keeps feeding streams that were already open.
+/// A new subscriber gets the carrier and its market immediately, then a fresh
+/// snapshot after every applied event, as named events (`carrier`, `market`) on
+/// one connection. `only` restricts updates to one carrier. Visibility is checked
+/// once, at open, so a carrier made `owner_only` later keeps feeding open streams.
 async fn open(
     state: AppState,
     carrier: Option<Value>,

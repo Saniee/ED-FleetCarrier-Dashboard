@@ -25,5 +25,5 @@ pub async fn get_events_by_callsign(
     db::log_event::recent(&state.db_pool, carrier_id, limit)
         .await
         .map(Json)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        .map_err(crate::error::internal)
 }

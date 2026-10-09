@@ -10,11 +10,8 @@ use crate::{
     app_state::AppState,
     auth::{AuthUser, Viewer},
     db::carriers,
+    error::internal,
 };
-
-fn internal<E>(_: E) -> StatusCode {
-    StatusCode::INTERNAL_SERVER_ERROR
-}
 
 /// `(carrier_id, owner_id)` behind a callsign, or 404. For owner actions
 /// (claim, release, settings), which do their own ownership check.
@@ -26,10 +23,8 @@ pub async fn resolve(state: &AppState, callsign: &str) -> Result<(i64, Option<i6
         .ok_or(StatusCode::NOT_FOUND)
 }
 
-/// The `carrier_id` behind a callsign, if `viewer` may read it.
-///
-/// `owner_only` carriers answer 404 to everyone but their owner, so their
-/// existence is not revealed.
+/// The `carrier_id` behind a callsign, if `viewer` may read it. `owner_only`
+/// carriers answer 404 to everyone but the owner, so they aren't revealed.
 pub async fn resolve_visible(
     state: &AppState,
     callsign: &str,

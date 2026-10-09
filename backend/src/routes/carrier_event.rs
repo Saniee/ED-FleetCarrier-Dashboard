@@ -6,6 +6,7 @@ use crate::{
     auth::{Access, Ingest},
     db::{body_names, carriers, log_event},
     edsm,
+    error::internal_msg,
     journal_definitions::{CarrierEvent, CarrierLocation},
 };
 
@@ -25,33 +26,31 @@ pub async fn post(
         ));
     }
 
-    // 1. Apply the event to the carrier state table first. `carrier_events.carrier`
-    //    is a foreign key onto `carriers`, so the carriers row has to exist before
-    //    the history row that references it is written.
+    // `carrier_events.carrier` is a foreign key onto `carriers`, so the carriers
+    // row has to exist before the history row that references it is written.
     let carrier_id = carriers::apply(&state.db_pool, &payload)
         .await
-        .map_err(internal)?;
+        .map_err(internal_msg)?;
 
     let event_id = log_event::insert(&state.db_pool, &payload, carrier_id)
         .await
-        .map_err(internal)?;
+        .map_err(internal_msg)?;
 
-    // CarrierStats only ever comes from the owner's own carrier management, so
-    // it is the one event that proves ownership: the first user token to post it
-    // for an unclaimed carrier claims it. (CarrierBuy is not used: players often
-    // start the plugin after buying.) The legacy token never claims.
+    // CarrierStats comes only from the owner's carrier management, so the first
+    // user token to post it for an unclaimed carrier claims it (not CarrierBuy:
+    // players often start the plugin after buying). The legacy token never claims.
     if let (Ingest::User(user_id), Some(id), CarrierEvent::CarrierStats(_)) =
         (ingest, carrier_id, &payload)
     {
         carriers::claim(&state.db_pool, id, user_id)
             .await
-            .map_err(internal)?;
+            .map_err(internal_msg)?;
     }
 
     if let (Some(id), Some(carrier_type)) = (carrier_id, payload.carrier_type()) {
         carriers::set_carrier_type(&state.db_pool, id, carrier_type)
             .await
-            .map_err(internal)?;
+            .map_err(internal_msg)?;
     }
 
     // Location events from anyone but the owner are flagged so clients can mark
@@ -63,12 +62,11 @@ pub async fn post(
         };
         carriers::set_location_unverified(&state.db_pool, id, reporter)
             .await
-            .map_err(internal)?;
+            .map_err(internal_msg)?;
     }
 
-    // 3. Stamp which history row produced the current state, then publish the
-    //    refreshed table. Events that could not be attributed to a carrier
-    //    change no state, so there is nothing to publish.
+    // Events that could not be attributed to a carrier change no state, so
+    // there is nothing to publish.
     if let Some(id) = carrier_id {
         // A location carries only a `BodyID`, and `carriers::apply` has just
         // blanked any name that no longer matches it, so fill the name back in
@@ -79,9 +77,9 @@ pub async fn post(
 
         carriers::set_last_event(&state.db_pool, id, event_id)
             .await
-            .map_err(internal)?;
+            .map_err(internal_msg)?;
 
-        if let Some(snapshot) = carriers::get(&state.db_pool, id).await.map_err(internal)? {
+        if let Some(snapshot) = carriers::get(&state.db_pool, id).await.map_err(internal_msg)? {
             let _ = state.tx.send(Update::Carrier(id, snapshot));
         }
     }
@@ -99,12 +97,9 @@ fn is_visitor_event(event: &CarrierEvent) -> bool {
     matches!(event, CarrierEvent::CarrierJump(_) | CarrierEvent::CarrierLocation(_))
 }
 
-/// Give a carrier its body name back after a `CarrierLocation`.
-///
-/// EDSM is asked at most once per system: the answer is cached in `body_names`,
-/// including the empty answer for a system it has never seen. Every failure path
-/// leaves the name blank rather than wrong — `carriers::apply` has already
-/// cleared the stale one.
+/// Give a carrier its body name back after a `CarrierLocation`. EDSM is asked at
+/// most once per system (misses are cached too), and a failure leaves the name
+/// blank rather than wrong.
 async fn resolve_body_name(state: &AppState, carrier_id: i64, location: &CarrierLocation) {
     let (system_address, body_id) = (location.system_address, location.body_id);
 
@@ -160,6 +155,3 @@ async fn set_body(state: &AppState, carrier_id: i64, name: Option<&str>, body_ty
     }
 }
 
-fn internal(err: sqlx::Error) -> (StatusCode, String) {
-    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-}

@@ -1,9 +1,6 @@
 /**
- * Login session for the dashboard.
- *
- * The session token comes from `POST /api/auth/login` and is sent as
- * `Authorization: Bearer`. It is kept in localStorage so a reload stays logged
- * in; the backend expires it (7 days) and `load()` drops one that has lapsed.
+ * Login session for the dashboard: the token from `POST /api/auth/login`, sent
+ * as `Authorization: Bearer` and kept in localStorage until it expires (7 days).
  */
 
 export interface User {

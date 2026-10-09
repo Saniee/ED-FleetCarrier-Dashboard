@@ -10,16 +10,13 @@ use crate::{
     app_state::AppState,
     auth::{self, AuthUser, SESSION_TTL_SECS},
     db::users,
+    error::{internal, internal_msg},
 };
 
 #[derive(Deserialize)]
 pub struct Credentials {
     username: String,
     password: String,
-}
-
-fn internal<E>(_: E) -> StatusCode {
-    StatusCode::INTERNAL_SERVER_ERROR
 }
 
 fn valid_username(name: &str) -> bool {
@@ -32,6 +29,10 @@ pub async fn register(
     State(state): State<AppState>,
     Json(body): Json<Credentials>,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
+    if !state.registration_open {
+        return Err((StatusCode::FORBIDDEN, "registration is closed".into()));
+    }
+
     let username = body.username.trim();
     if !valid_username(username) {
         return Err((
@@ -52,7 +53,7 @@ pub async fn register(
 
     let user = users::create(&state.db_pool, username, &hash)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(internal_msg)?
         .ok_or((StatusCode::CONFLICT, "username already taken".into()))?;
 
     Ok((StatusCode::CREATED, Json(json!(user))))
@@ -126,7 +127,7 @@ pub async fn create_token(
     let secret = auth::new_token();
     let meta = users::create_api_token(&state.db_pool, user.id, name, &auth::hash_token(&secret))
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal_msg)?;
 
     Ok((StatusCode::CREATED, Json(json!({ "token": secret, "meta": meta }))))
 }

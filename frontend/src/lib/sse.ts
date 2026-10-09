@@ -6,11 +6,9 @@ export interface SseHandlers {
 }
 
 /**
- * Server-sent events over `fetch`, so the session token travels in the
- * `Authorization` header instead of a URL (EventSource cannot set headers, and
- * URLs end up in proxy and access logs).
- *
- * No automatic reconnect: the caller owns the backoff.
+ * Server-sent events over `fetch`, so the session token goes in the
+ * `Authorization` header instead of a URL. No automatic reconnect: the caller
+ * owns the backoff.
  */
 export function openStream(url: string, token: string | null, handlers: SseHandlers) {
 	const controller = new AbortController();
@@ -55,7 +53,6 @@ export function openStream(url: string, token: string | null, handlers: SseHandl
 				}
 			}
 		} catch {
-			// Fall through to onclose, unless we closed it ourselves.
 		}
 		if (!controller.signal.aborted) handlers.onclose();
 	})();

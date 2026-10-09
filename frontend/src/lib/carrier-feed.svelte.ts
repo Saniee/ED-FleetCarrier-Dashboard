@@ -9,22 +9,17 @@ const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
 /**
- * How often to probe the API for liveness.
- *
- * The stream cannot be trusted to report its own death: when the backend goes
- * away the dev proxy leaves the SSE connection open, so the browser never fires
- * `onerror` and the page would sit on stale data forever. The probe is what
- * actually notices the API disappearing — and coming back.
+ * How often to probe the API for liveness. The stream can't report its own death
+ * (the dev proxy keeps the SSE connection open), so the probe is what notices the
+ * API going away and coming back.
  */
 const PING_MS = 5000;
 
 export const HISTORY_LIMIT = 20;
 
 /**
- * Live carrier feed: the SSE stream, its reconnect backoff, a liveness probe,
- * and the history fetch for one carrier, addressed by callsign.
- *
- * Call `start()` on mount and `stop()` on teardown.
+ * Live feed for one callsign: SSE stream, reconnect backoff, liveness probe and
+ * history fetch. Call `start()` on mount and `stop()` on teardown.
  */
 export function createCarrierFeed(initial: Carrier | null, callsign: string) {
 	const base = `/api/carriers/${encodeURIComponent(callsign)}`;

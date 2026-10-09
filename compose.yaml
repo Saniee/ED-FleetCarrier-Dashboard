@@ -24,7 +24,9 @@ services:
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      TOKEN: ${TOKEN}
+      TOKEN: ${TOKEN:-}
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-1}
+      RATE_LIMIT: ${RATE_LIMIT:-1}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

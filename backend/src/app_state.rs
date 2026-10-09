@@ -10,11 +10,8 @@ use crate::db::carriers::CarrierSnapshot;
 /// subscribers and served by the REST read.
 pub type MarketSnapshot = Value;
 
-/// One message on the dashboard stream.
-///
-/// Both domains share a single channel so the frontend needs one connection: the
-/// stream tags each message with its own event name (`carrier` / `market`), and
-/// a subscriber that only cares about one can ignore the other.
+/// One message on the dashboard stream. Carrier and market updates share a
+/// channel, tagged `carrier` / `market`, so the frontend needs one connection.
 #[derive(Clone, Debug)]
 pub enum Update {
     /// (carrier_id, snapshot); the id lets per-carrier streams filter.
@@ -28,11 +25,16 @@ pub struct AppState {
     /// Shared HTTP client, currently only for the EDSM body-name lookup. Built
     /// once so its connection pool and TLS state are reused.
     pub http: reqwest::Client,
-    /// Fan-out of dashboard updates to live subscribers. Every applied event
-    /// publishes a freshly read snapshot here.
     pub tx: broadcast::Sender<Update>,
     /// Legacy shared ingest secret from the `TOKEN` env var. Per-user API
     /// tokens are checked first; this is the fallback for existing installs.
-    /// `None` leaves ingest open to token-less requests (dev only).
+    /// `None` disables the legacy fallback.
     pub legacy_token: Option<String>,
+    /// Accept ingest with no token at all (`ALLOW_ANON_INGEST=1`). Dev only.
+    pub anon_ingest: bool,
+    /// Whether `POST /api/auth/register` creates accounts (`ALLOW_REGISTRATION`,
+    /// on unless set to `0` / `false`).
+    pub registration_open: bool,
+    /// Per-IP request limits (`RATE_LIMIT`, on unless set to `0` / `false`).
+    pub rate_limit: bool,
 }

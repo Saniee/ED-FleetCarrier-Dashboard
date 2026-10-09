@@ -10,15 +10,13 @@ use crate::{
     app_state::{AppState, Update},
     auth::{Access, Ingest, Viewer},
     db::{carriers, commodities, market},
+    error::{internal, internal_msg},
     journal_definitions::MarketEvent,
 };
 
-/// The `{ event, commodities }` envelope, as served by the REST read and
-/// published on the stream.
-///
-/// The two halves live in separate tables owned by separate modules; assembling
-/// them into one payload is an API concern, so it happens here rather than in
-/// either of them. `None` when no `Market` event has been seen for the carrier.
+/// The `{ event, commodities }` envelope for a carrier's market, or `None` if no
+/// `Market` event has been seen. Assembled here because the two halves live in
+/// separate tables owned by separate modules.
 pub async fn snapshot(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<Value>> {
     let Some(event) = market::get(pool, carrier_id).await? else {
         return Ok(None);
@@ -29,11 +27,9 @@ pub async fn snapshot(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<Val
     Ok(Some(json!({ "event": event, "commodities": commodities })))
 }
 
-/// Ingest one `Market` event and publish the refreshed market.
-///
-/// Only the carrier's own market is tracked, so a `Market` event for any other
-/// station is accepted and dropped rather than rejected: the plugin forwards
-/// every market the commander opens, and a station market is not an error.
+/// Ingest one `Market` event and publish the refreshed market. Other stations'
+/// markets are accepted and dropped, not rejected: the plugin forwards every
+/// market the commander opens.
 pub async fn post(
     State(state): State<AppState>,
     ingest: Ingest,
@@ -77,18 +73,18 @@ pub async fn post(
     // the market can be the first event we ever see for a carrier.
     carriers::ensure(&state.db_pool, carrier_id)
         .await
-        .map_err(internal)?;
+        .map_err(internal_msg)?;
 
     // Header and commodity list are two halves of one snapshot: write them
     // together so a failure cannot leave them disagreeing.
-    let mut tx = state.db_pool.begin().await.map_err(internal)?;
-    market::upsert(&mut tx, &payload).await.map_err(internal)?;
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    market::upsert(&mut tx, &payload).await.map_err(internal_msg)?;
     commodities::replace(&mut tx, carrier_id, &payload.items)
         .await
-        .map_err(internal)?;
-    tx.commit().await.map_err(internal)?;
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
 
-    if let Some(snapshot) = snapshot(&state.db_pool, carrier_id).await.map_err(internal)? {
+    if let Some(snapshot) = snapshot(&state.db_pool, carrier_id).await.map_err(internal_msg)? {
         let _ = state.tx.send(Update::Market(carrier_id, snapshot));
     }
 
@@ -110,11 +106,8 @@ pub async fn get_by_callsign(
     let carrier_id = super::carriers::resolve_visible(&state, &callsign, &viewer).await?;
     snapshot(&state.db_pool, carrier_id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(internal)?
         .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
 }
 
-fn internal(err: sqlx::Error) -> (StatusCode, String) {
-    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-}
