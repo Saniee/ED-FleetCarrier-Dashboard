@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#000"/>
+  <g fill="#fff" opacity=".5">
+    <circle cx="9" cy="12" r=".6"/>
+    <circle cx="55" cy="9" r=".5"/>
+    <circle cx="11" cy="54" r=".5"/>
+    <circle cx="57" cy="56" r=".6"/>
+  </g>
+  <g transform="translate(32 32) rotate(45) scale(0.95) translate(-32 -32)">
+    <rect x="26.2" y="50" width="3.4" height="12.2" fill="#1f40c0" rx="1"/>
+    <rect x="34.4" y="50" width="3.4" height="12.2" fill="#1f40c0" rx="1"/>
+    <rect x="29.6" y="52" width="4.8" height="10.4" fill="#14204f" rx="0.8"/>
+    <rect x="26.2" y="54" width="3.4" height="1" fill="#f0e6e4"/>
+    <rect x="34.4" y="54" width="3.4" height="1" fill="#f0e6e4"/>
+    <rect x="24" y="57.4" width="2.4" height="4.8" fill="#aebfff" rx="0.7"/>
+    <rect x="37.6" y="57.4" width="2.4" height="4.8" fill="#aebfff" rx="0.7"/>
+    <circle cx="27.9" cy="62.4" r="0.7" fill="#ffb000"/>
+    <circle cx="36.1" cy="62.4" r="0.7" fill="#ffb000"/>
+    <polygon points="24.4,49.2 18.2,49.2 17.2,51.4 17.2,52.8 24.4,52.8" fill="#1f40c0"/>
+    <polygon points="39.6,49.2 45.8,49.2 46.8,51.4 46.8,52.8 39.6,52.8" fill="#1f40c0"/>
+    <rect x="19" y="50" width="1.4" height="2.2" fill="#f0e6e4"/>
+    <rect x="43.6" y="50" width="1.4" height="2.2" fill="#f0e6e4"/>
+    <rect x="21.8" y="50" width="1.4" height="2.2" fill="#f0e6e4"/>
+    <rect x="40.8" y="50" width="1.4" height="2.2" fill="#f0e6e4"/>
+    <polygon points="29.8,8 33,8" fill="#1f40c0"/>
+    <polygon points="26.1,8.6 37.9,8.6 40.1,15 40.1,49.4 23.9,49.4 23.9,15" fill="#1f40c0"/>
+    <rect x="23.9" y="22" width="3.2" height="0.9" fill="#f0e6e4"/>
+    <rect x="36.9" y="22" width="3.2" height="0.9" fill="#f0e6e4"/>
+    <rect x="23.9" y="28" width="3.2" height="0.9" fill="#f0e6e4"/>
+    <rect x="36.9" y="28" width="3.2" height="0.9" fill="#f0e6e4"/>
+    <rect x="23.9" y="34" width="3.2" height="0.9" fill="#f0e6e4"/>
+    <rect x="36.9" y="34" width="3.2" height="0.9" fill="#f0e6e4"/>
+    <rect x="23.9" y="40" width="3.2" height="0.9" fill="#f0e6e4"/>
+    <rect x="36.9" y="40" width="3.2" height="0.9" fill="#f0e6e4"/>
+    <rect x="23.9" y="46" width="3.2" height="0.9" fill="#f0e6e4"/>
+    <rect x="36.9" y="46" width="3.2" height="0.9" fill="#f0e6e4"/>
+    <rect x="24.6" y="30" width="3.2" height="13" fill="#0e0f14"/>
+    <rect x="36.2" y="30" width="3.2" height="13" fill="#0e0f14"/>
+    <rect x="28" y="16.8" width="8" height="26.6" fill="#0e0f14"/>
+    <rect x="31.6" y="16.8" width="0.8" height="26.6" fill="#000"/>
+    <rect x="28.3" y="17.4" width="3" height="4.4" fill="#1a1d27" stroke="#2a3a8a" stroke-width=".5"/>
+    <rect x="32.7" y="17.4" width="3" height="4.4" fill="#1a1d27" stroke="#2a3a8a" stroke-width=".5"/>
+    <rect x="28.3" y="22.6" width="3" height="4.4" fill="#1a1d27" stroke="#2a3a8a" stroke-width=".5"/>
+    <rect x="32.7" y="22.6" width="3" height="4.4" fill="#1a1d27" stroke="#2a3a8a" stroke-width=".5"/>
+    <rect x="28.3" y="27.8" width="3" height="4.4" fill="#1a1d27" stroke="#2a3a8a" stroke-width=".5"/>
+    <rect x="32.7" y="27.8" width="3" height="4.4" fill="#1a1d27" stroke="#2a3a8a" stroke-width=".5"/>
+    <rect x="28.3" y="33" width="3" height="4.4" fill="#1a1d27" stroke="#2a3a8a" stroke-width=".5"/>
+    <rect x="32.7" y="33" width="3" height="4.4" fill="#1a1d27" stroke="#2a3a8a" stroke-width=".5"/>
+    <rect x="28.3" y="38.2" width="3" height="4.4" fill="#1a1d27" stroke="#2a3a8a" stroke-width=".5"/>
+    <rect x="32.7" y="38.2" width="3" height="4.4" fill="#1a1d27" stroke="#2a3a8a" stroke-width=".5"/>
+    <polygon points="26,14.8 18.6,14.8 18.6,16.2 19.6,18.6 26,18.6" fill="#1f40c0"/>
+    <polygon points="38,14.8 45.4,14.8 45.4,16.2 44.4,18.6 38,18.6" fill="#1f40c0"/>
+    <rect x="20.6" y="14.8" width="1.3" height="3.8" fill="#f0e6e4"/>
+    <rect x="42.1" y="14.8" width="1.3" height="3.8" fill="#f0e6e4"/>
+    <rect x="23.4" y="14.8" width="1.3" height="3.8" fill="#f0e6e4"/>
+    <rect x="39.3" y="14.8" width="1.3" height="3.8" fill="#f0e6e4"/>
+    <polygon points="29.4,8.6 30.4,2.4 31.4,2.4 31.4,8.6" fill="#dfe8ff"/>
+    <polygon points="34.6,8.6 33.6,2.4 32.6,2.4 32.6,8.6" fill="#dfe8ff"/>
+    <polygon points="28,10 28.8,4.6 29.6,10" fill="#dfe8ff"/>
+    <polygon points="36,10 35.2,4.6 34.4,10" fill="#dfe8ff"/>
+    <rect x="30.4" y="8.6" width="3.2" height="6.4" fill="#f0e6e4"/>
+  </g>
+</svg>
