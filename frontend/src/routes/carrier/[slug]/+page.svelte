@@ -4,8 +4,8 @@
   import { createCarrierFeed } from '$lib/carrier-feed.svelte';
   import { eventSummary } from '$lib/carrier-summary';
   import { formatTimestamp, formatNumber, formatCountdown, parseTimestamp } from '$lib/format';
-  import { auth, api } from '$lib/auth.svelte';
-  import { VISIBILITIES, VISIBILITY_LABEL, type Visibility } from '$lib/visibility';
+  import { goto } from '$app/navigation';
+  import { auth } from '$lib/auth.svelte';
   import { carrierMassFor, isSquadronHull, fuelPerJump, jumpsLeft, MAX_JUMP_RANGE } from '$lib/carrier-fuel';
   import { commodityName, commodityCategory, commodityPrice, commodityQuantity, isTraded } from '$lib/commodity';
 
@@ -70,33 +70,11 @@
     feed.start();
     return () => feed.stop();
   });
-  // Owner controls. The backend enforces ownership; this only decides what to show.
+  // Owner settings live in a dialog on the account page; this only decides
+  // whether to link there. The backend enforces ownership.
   const owner = $derived(
     feed.carrier?.owner_id != null && feed.carrier.owner_id === auth.user?.id
   );
-  const claimable = $derived(!!auth.user && !!feed.carrier && feed.carrier.owner_id === null);
-  let actionError = $state('');
-
-  async function act(method: string, path: string, body?: unknown) {
-    actionError = '';
-    const res = await api(`/api/carriers/${encodeURIComponent(data.slug)}${path}`, {
-      method,
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
-    if (!res.ok) actionError = `${method} ${path || '/'} failed (${res.status})`;
-    await feed.reload();
-  }
-
-  let isAlien = $state(false);
-  function toggleTheme() {
-    isAlien = !isAlien;
-
-    if (isAlien) {
-      document.documentElement.setAttribute('data-theme', 'alien');
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-    }
-  }
 </script>
 <svelte:head>
   <title>{feed.carrier?.callsign ?? data.slug} · ED Commander</title>
@@ -114,42 +92,25 @@
         <h1>
         {feed.carrier.name ?? 'unknown carrier'}
         <span class="callsign">{feed.carrier.callsign ?? '—'}</span>
-        {#if feed.carrier.is_squadron || isSquadronHull(feed.carrier.carrier_type)}<span class="muted">Squadron</span>{/if}
+        {#if feed.carrier.is_squadron || isSquadronHull(feed.carrier.carrier_type)}<span class="tag">Squadron</span>{/if}
       </h1>
       <div>
-        {#if claimable}
-          <button onclick={() => act('POST', '/claim')}>Claim</button>
-        {/if}
         {#if owner}
-          <button onclick={() => act('DELETE', '/claim')}>Release</button>
-          <label>
-            <input
-              type="checkbox"
-              checked={feed.carrier?.is_squadron || isSquadronHull(feed.carrier?.carrier_type)}
-              disabled={isSquadronHull(feed.carrier?.carrier_type)}
-              onchange={(e) => act('PATCH', '', { is_squadron: e.currentTarget.checked })}
-            />
-            Squadron carrier
-          </label>
-          <select
-            value={feed.carrier?.visibility}
-            onchange={(e) => act('PATCH', '', { visibility: e.currentTarget.value as Visibility })}
-          >
-            {#each VISIBILITIES as v}
-              <option value={v}>{VISIBILITY_LABEL[v]}</option>
-            {/each}
-          </select>
+          <button onclick={() => goto(`/account?manage=${encodeURIComponent(feed.carrier?.callsign ?? '')}`)}>
+            Manage
+          </button>
         {/if}
-        <button onclick={toggleTheme}>Change Theme</button>
       </div>
     </header>
-    {#if actionError}<p class="muted">{actionError}</p>{/if}
     {#if feed.carrier.visibility === 'private'}<p class="muted">Private: not in the carrier list, reachable by link.</p>{/if}
     {#if feed.carrier.visibility === 'owner_only'}<p class="muted">Owner only: nobody else can see this carrier.</p>{/if}
       <div class="stats">
         <div class="stat">
           <span class="stat__label">Fuel</span>
-          <span class="stat__value">{formatNumber(feed.carrier.fuel_level)}</span>
+          <!-- Keyed so a live change recreates the value and replays its flash. -->
+          {#key feed.carrier.fuel_level}
+            <span class="stat__value stat__value--live">{formatNumber(feed.carrier.fuel_level)}</span>
+          {/key}
           {#if fuel}
             <span class="stat__hint">
               ≈ {formatNumber(fuel.left)} jumps left · {formatNumber(fuel.perJump)} t per
@@ -159,7 +120,9 @@
         </div>
         <div class="stat">
           <span class="stat__label">Current system</span>
-          <span class="stat__value">{feed.carrier.star_system ?? '—'}{#if feed.carrier.location_unverified}<span title="Last reported by someone other than the owner">*</span>{/if}</span>
+          {#key feed.carrier.star_system}
+            <span class="stat__value stat__value--live">{feed.carrier.star_system ?? '—'}{#if feed.carrier.location_unverified}<span title="Last reported by someone other than the owner">*</span>{/if}</span>
+          {/key}
           {#if feed.carrier.body}
             <span class="stat__hint">{feed.carrier.body}</span>
           {/if}
@@ -241,7 +204,7 @@
     <div class="history__head">
       <h2>History</h2>
       <span
-        class="status"
+        class="status status--stream"
         class:status--online={feed.status === 'connected'}
         class:status--connecting={feed.status === 'connecting'}
         class:status--offline={feed.status === 'OFFLINE'}

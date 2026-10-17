@@ -59,7 +59,7 @@
   </form>
 
   {#if error}
-    <p class="muted">{error}</p>
+    <p class="error">{error}</p>
   {:else if !result}
     <p class="muted">Loading…</p>
   {:else if result.items.length === 0}
@@ -80,7 +80,7 @@
           {#each result.items as c (c.carrier_id)}
             <tr>
               <td><a href={`/carrier/${encodeURIComponent(c.callsign ?? '')}`}>{c.callsign}</a></td>
-              <td>{c.name ?? '—'}{#if c.is_squadron || isSquadronHull(c.carrier_type)} <span class="muted">[Squadron]</span>{/if}</td>
+              <td>{c.name ?? '—'}{#if c.is_squadron || isSquadronHull(c.carrier_type)} <span class="tag">Squadron</span>{/if}</td>
               <td>{c.star_system ?? '—'}{#if c.location_unverified}*{/if}</td>
               <td>{c.docking_access ?? '—'}</td>
               <td>{formatTimestamp(c.updated_at)}</td>
@@ -90,9 +90,9 @@
       </table>
     </div>
 
-    <p>
+    <p class="pager">
       <button disabled={result.page <= 1} onclick={() => go(result!.page - 1)}>Prev</button>
-      Page {result.page} of {Math.max(1, result.total_pages)}
+      <span>Page {result.page} of {Math.max(1, result.total_pages)}</span>
       <button disabled={result.page >= result.total_pages} onclick={() => go(result!.page + 1)}>Next</button>
     </p>
   {/if}
