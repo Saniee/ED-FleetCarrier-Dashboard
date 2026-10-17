@@ -1,3 +1,6 @@
+mod admin;
+#[cfg(test)]
+mod admin_tests;
 mod auth;
 mod carriers;
 mod carrier_event;
@@ -118,7 +121,13 @@ pub fn router(app: AppState) -> Router {
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/auth/me", get(auth::me))
         .route("/api/auth/tokens", get(auth::list_tokens).post(auth::create_token))
-        .route("/api/auth/tokens/{id}", delete(auth::delete_token));
+        .route("/api/auth/tokens/{id}", delete(auth::delete_token))
+        .route("/api/admin/users", get(admin::list_users))
+        .route("/api/admin/users/{id}", get(admin::get_user).patch(admin::update_user).delete(admin::delete_user))
+        .route("/api/admin/users/{id}/disable", post(admin::disable_user))
+        .route("/api/admin/users/{id}/enable", post(admin::enable_user))
+        .route("/api/admin/users/{id}/sessions", delete(admin::revoke_sessions))
+        .route("/api/admin/users/{id}/tokens/{token_id}", delete(admin::revoke_token));
 
     let (credentials, ingest, general) = if app.rate_limit {
         (

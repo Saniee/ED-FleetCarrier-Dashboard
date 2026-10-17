@@ -52,6 +52,11 @@ docker compose exec backend backend admin list
 
 Outside Docker, run the same from `backend/` with `cargo run -- admin ...`. Each change is written to the `admin_actions` audit log. A disabled account can't log in (403), its sessions stop working, and its ingest tokens are rejected.
 
+Admins manage accounts under `/api/admin/users`: search and inspect accounts, disable or re-enable them (with a reason), sign them out everywhere, revoke their tokens, change roles, and delete them. A disabled account's carriers are hidden from everyone but admins until it is re-enabled; deleting an account leaves its carriers unowned, history intact. An admin can't disable, demote or delete their own account, and the last active admin can't be removed.
+
+### Tests
+`cargo test` in `backend/` includes tests that need Postgres: each creates and drops its own temporary database through `DATABASE_URL` (from `backend/.env`), so that role needs permission to create databases. With the compose database running, the default user has it.
+
 # Extending Functionality
 ## Data Schema
 Data schema and all information from the endpoints can be found in the source code.

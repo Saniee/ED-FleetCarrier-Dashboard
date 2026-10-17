@@ -801,14 +801,16 @@ pub async fn set_location_unverified(
     Ok(())
 }
 
-/// A carrier found by callsign: `(carrier_id, owner_id, visibility)`,
-/// case-insensitively.
+/// A carrier found by callsign, case-insensitively: `(carrier_id, owner_id,
+/// visibility, owner_disabled)`.
 pub async fn find_by_callsign(
     pool: &PgPool,
     callsign: &str,
-) -> sqlx::Result<Option<(i64, Option<i64>, String)>> {
+) -> sqlx::Result<Option<(i64, Option<i64>, String, bool)>> {
     sqlx::query_as(
-        "SELECT carrier_id, owner_id, visibility FROM carriers WHERE upper(callsign) = upper($1)",
+        "SELECT c.carrier_id, c.owner_id, c.visibility, coalesce(u.disabled_at IS NOT NULL, false)
+         FROM carriers c LEFT JOIN users u ON u.id = c.owner_id
+         WHERE upper(c.callsign) = upper($1)",
     )
     .bind(callsign)
     .fetch_optional(pool)
@@ -878,7 +880,7 @@ pub async fn list_owned(pool: &PgPool, user_id: i64) -> sqlx::Result<Vec<Value>>
 }
 
 /// One page of public carriers with a callsign, most recently active first, plus
-/// the total count. `search` matches callsign, name or system.
+/// the total count. Carriers of disabled accounts are left out. `search` matches callsign, name or system.
 pub async fn list_public(
     pool: &PgPool,
     search: Option<&str>,
@@ -896,6 +898,7 @@ pub async fn list_public(
     let total: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM carriers
          WHERE visibility = 'public' AND callsign IS NOT NULL AND
+               NOT EXISTS (SELECT 1 FROM users u WHERE u.id = owner_id AND u.disabled_at IS NOT NULL) AND
                ($1::text IS NULL OR callsign ILIKE $1 OR name ILIKE $1 OR star_system ILIKE $1)",
     )
     .bind(&pattern)
@@ -911,6 +914,7 @@ pub async fn list_public(
              'updated_at', updated_at)
          FROM carriers
          WHERE visibility = 'public' AND callsign IS NOT NULL AND
+               NOT EXISTS (SELECT 1 FROM users u WHERE u.id = owner_id AND u.disabled_at IS NOT NULL) AND
                ($1::text IS NULL OR callsign ILIKE $1 OR name ILIKE $1 OR star_system ILIKE $1)
          ORDER BY updated_at DESC, carrier_id LIMIT $2 OFFSET $3",
     )
