@@ -83,6 +83,22 @@ impl FromRequestParts<AppState> for AuthUser {
     }
 }
 
+/// The logged-in user, who must be an admin: 401 without a session, 403 for
+/// anyone else.
+pub struct AdminUser(pub User);
+
+impl FromRequestParts<AppState> for AdminUser {
+    type Rejection = StatusCode;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, StatusCode> {
+        let AuthUser(user) = AuthUser::from_request_parts(parts, state).await?;
+        if !user.is_admin() {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        Ok(AdminUser(user))
+    }
+}
+
 /// The logged-in user, or `None`: anonymous viewers are normal on public pages,
 /// so this never rejects. The token is read from the `Authorization` header only.
 pub struct Viewer(pub Option<User>);

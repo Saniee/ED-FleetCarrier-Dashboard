@@ -6,6 +6,7 @@
 export interface User {
 	id: number;
 	username: string;
+	role: 'user' | 'admin';
 }
 
 interface Session {
@@ -58,7 +59,9 @@ async function login(username: string, password: string): Promise<string> {
 		method: 'POST',
 		body: JSON.stringify({ username, password })
 	});
-	if (!res.ok) return res.status === 401 ? 'Wrong username or password.' : failure(res);
+	if (res.status === 401) return 'Wrong username or password.';
+	if (res.status === 403) return 'This account has been disabled.';
+	if (!res.ok) return failure(res);
 	store((await res.json()) as Session);
 	return '';
 }

@@ -35,10 +35,22 @@ docker compose exec db psql -U <user> -d <db> -c "UPDATE carriers SET owner_id =
 | `RATE_LIMIT` | `1` | Per-IP request limits: login/register 5 burst then 1 per 6 s, ingest 60 burst then 10/s, other API calls 60 burst then 20/s (over the limit: 429). `0` disables. |
 | `ALLOW_ANON_INGEST` | off | `1` accepts ingest with no token at all. Dev only. `scripts/reseed.ps1` takes a token instead (`-Token`, or `$env:ED_INGEST_TOKEN`). |
 | `DEV_CONSOLE` | off | `1` serves an API test page at `/dev`. Dev only. |
+| `BIND_ADDR` | `0.0.0.0:8080` | Address the backend listens on. |
 
 Rate limits key on the client IP the reverse proxy reports: the last `X-Forwarded-For` entry (the one the proxy itself added, so client-supplied entries are ignored), then `X-Real-IP`. The backend must sit behind that proxy (compose binds it to loopback); exposed directly, those headers can be forged.
 
 Migrations run automatically when the backend starts.
+
+### Admins
+Admins are made from the server's shell, never from the web, so registering a particular name can't make anyone an admin:
+
+```
+docker compose exec backend backend admin grant <username>
+docker compose exec backend backend admin revoke <username>
+docker compose exec backend backend admin list
+```
+
+Outside Docker, run the same from `backend/` with `cargo run -- admin ...`. Each change is written to the `admin_actions` audit log. A disabled account can't log in (403), its sessions stop working, and its ingest tokens are rejected.
 
 # Extending Functionality
 ## Data Schema

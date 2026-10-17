@@ -6,6 +6,25 @@ use sqlx::PgPool;
 pub struct User {
     pub id: i64,
     pub username: String,
+    /// `user` or `admin` (a CHECK constraint keeps it to those).
+    pub role: String,
+}
+
+impl User {
+    pub fn is_admin(&self) -> bool {
+        self.role == ROLE_ADMIN
+    }
+}
+
+pub const ROLE_USER: &str = "user";
+pub const ROLE_ADMIN: &str = "admin";
+
+/// A login lookup: the user, their password hash, and whether an admin has
+/// disabled the account.
+pub struct Login {
+    pub user: User,
+    pub password_hash: String,
+    pub disabled: bool,
 }
 
 /// An API token's metadata. The secret itself is never stored.
@@ -26,7 +45,7 @@ pub async fn create(
     sqlx::query_as(
         "INSERT INTO users (username, password_hash) VALUES ($1, $2)
          ON CONFLICT DO NOTHING
-         RETURNING id, username",
+         RETURNING id, username, role",
     )
     .bind(username)
     .bind(password_hash)
@@ -34,18 +53,20 @@ pub async fn create(
     .await
 }
 
-pub async fn find_with_hash(
-    pool: &PgPool,
-    username: &str,
-) -> sqlx::Result<Option<(User, String)>> {
-    let row: Option<(i64, String, String)> = sqlx::query_as(
-        "SELECT id, username, password_hash FROM users WHERE lower(username) = lower($1)",
+pub async fn find_for_login(pool: &PgPool, username: &str) -> sqlx::Result<Option<Login>> {
+    let row: Option<(i64, String, String, String, bool)> = sqlx::query_as(
+        "SELECT id, username, role, password_hash, disabled_at IS NOT NULL
+         FROM users WHERE lower(username) = lower($1)",
     )
     .bind(username)
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|(id, username, hash)| (User { id, username }, hash)))
+    Ok(row.map(|(id, username, role, password_hash, disabled)| Login {
+        user: User { id, username, role },
+        password_hash,
+        disabled,
+    }))
 }
 
 pub async fn create_session(
@@ -68,8 +89,8 @@ pub async fn create_session(
 
 pub async fn user_for_session(pool: &PgPool, token_hash: &[u8]) -> sqlx::Result<Option<User>> {
     sqlx::query_as(
-        "SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id
-         WHERE s.token_hash = $1 AND s.expires_at > now()",
+        "SELECT u.id, u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.token_hash = $1 AND s.expires_at > now() AND u.disabled_at IS NULL",
     )
     .bind(token_hash)
     .fetch_optional(pool)
@@ -148,11 +169,13 @@ pub async fn regenerate_api_token(
     .await
 }
 
-/// Resolve an ingest token to its owner. `last_used_at` is stamped at most once
-/// a minute, so a busy plugin does not turn every event into a row write.
+/// Resolve an ingest token to its owner; a disabled owner's tokens resolve to
+/// nothing. `last_used_at` is stamped at most once a minute, so a busy plugin
+/// does not turn every event into a row write.
 pub async fn user_for_api_token(pool: &PgPool, token_hash: &[u8]) -> sqlx::Result<Option<i64>> {
     sqlx::query_scalar(
-        "WITH t AS (SELECT id, user_id FROM api_tokens WHERE token_hash = $1),
+        "WITH t AS (SELECT a.id, a.user_id FROM api_tokens a JOIN users u ON u.id = a.user_id
+                    WHERE a.token_hash = $1 AND u.disabled_at IS NULL),
               u AS (UPDATE api_tokens SET last_used_at = now()
                     WHERE id IN (SELECT id FROM t)
                       AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute'))

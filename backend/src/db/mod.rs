@@ -4,6 +4,7 @@ pub mod market;
 pub mod commodities;
 pub mod body_names;
 pub mod users;
+pub mod admin;
 
 use sqlx::PgPool;
 

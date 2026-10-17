@@ -63,17 +63,22 @@ pub async fn login(
     State(state): State<AppState>,
     Json(body): Json<Credentials>,
 ) -> Result<Json<Value>, StatusCode> {
-    let found = users::find_with_hash(&state.db_pool, body.username.trim())
+    let found = users::find_for_login(&state.db_pool, body.username.trim())
         .await
         .map_err(internal)?;
 
     // Unknown user and wrong password are indistinguishable to the caller.
-    let Some((user, hash)) = found else {
+    let Some(login) = found else {
         return Err(StatusCode::UNAUTHORIZED);
     };
-    if !auth::verify_password(body.password, hash).await {
+    if !auth::verify_password(body.password, login.password_hash).await {
         return Err(StatusCode::UNAUTHORIZED);
     }
+    // Only after the password, so this doesn't reveal which accounts exist.
+    if login.disabled {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let user = login.user;
 
     let _ = users::purge_expired_sessions(&state.db_pool).await;
 
@@ -146,10 +151,10 @@ pub async fn regenerate_token(
     Path(id): Path<i64>,
     Json(body): Json<Reauth>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    let hash = users::find_with_hash(&state.db_pool, &user.username)
+    let hash = users::find_for_login(&state.db_pool, &user.username)
         .await
         .map_err(internal_msg)?
-        .map(|(_, hash)| hash);
+        .map(|login| login.password_hash);
     // 403, not 401: the session is fine, and the client logs out on 401.
     let Some(hash) = hash else {
         return Err((StatusCode::FORBIDDEN, "wrong password".into()));

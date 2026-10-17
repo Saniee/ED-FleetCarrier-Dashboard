@@ -7,6 +7,7 @@ mod routes;
 mod journal_definitions;
 mod app_state;
 mod auth;
+mod cli;
 mod edsm;
 mod error;
 
@@ -25,6 +26,18 @@ async fn main() {
     // Load .env for a native `cargo run`. In a container the environment is
     // provided by the orchestrator and there is no .env, so its absence is fine.
     let _ = dotenvy::dotenv();
+
+    // `backend admin ...` manages roles and exits instead of serving.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "admin") {
+        let pool = db::connect(&std::env::var("DATABASE_URL").expect("Missing db url!")).await;
+        if let Err(msg) = cli::admin(&pool, &args[1..]).await {
+            eprintln!("{msg}");
+            std::process::exit(2);
+        }
+        return;
+    }
+
     let (tx, _rx) = broadcast::channel(100);
 
     println!("Connecting to db...");
@@ -48,8 +61,9 @@ async fn main() {
         println!("Registration is closed.");
     }
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
-    println!("Backend UP! Listening at 0.0.0.0:8080");
+    let addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    println!("Backend UP! Listening at {addr}");
 
     axum::serve(
         listener,
