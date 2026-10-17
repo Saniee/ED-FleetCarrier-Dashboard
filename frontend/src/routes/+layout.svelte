@@ -4,6 +4,9 @@
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/auth.svelte';
 	import { theme } from '$lib/theme.svelte';
+	import { onMount } from 'svelte';
+
+	onMount(() => void auth.refresh());
 </script>
 
 <svelte:head>
@@ -17,6 +20,9 @@
 		<div>
 			<button onclick={() => theme.toggle()}>Change Theme</button>
 			{#if auth.user}
+				{#if auth.isAdmin}
+					<button onclick={() => goto('/admin')}>Admin</button>
+				{/if}
 				<button onclick={() => goto('/account')}>{auth.user.username}</button>
 				<button onclick={() => auth.logout()}>Logout</button>
 			{:else}

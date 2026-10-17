@@ -704,6 +704,13 @@ body::before {
     text-shadow: none;
     opacity: 0.85;
   }
+  /* Needs attention: a disabled account. Filled, so it reads at a glance. */
+  .tag--alert {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-bg);
+    opacity: 1;
+  }
 
   /* ---------- page sections ---------- */
 
@@ -804,6 +811,40 @@ body::before {
     gap: 0.5rem;
   }
 
+  /* Room for a table inside (admin account view). */
+  .modal--wide {
+    width: min(44rem, calc(100vw - 2rem));
+  }
+  .modal__note {
+    margin: -0.5rem 0 1rem;
+  }
+  /* A field and its buttons on one line, wrapping on narrow screens. */
+  .modal__row {
+    clear: both;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    input {
+      flex: 1 1 12rem;
+      min-width: 0;
+    }
+    .option__hint {
+      flex: 1 1 auto;
+    }
+  }
+  /* Compact table in a modal group: no zebra or row animation, smaller type. */
+  .modal__table {
+    clear: both;
+    width: 100%;
+    margin-top: 0.6rem;
+    font-size: 0.85rem;
+    th,
+    td {
+      padding: 0.25rem 0.5rem;
+    }
+  }
+
   /* A panel that is itself a form (a prompt): stacked, not the inline row
      page forms use. */
   .carrier-page form.modal__form {
@@ -869,6 +910,9 @@ body::before {
     overflow-x: auto;
   }
   .carrier_history table {
+    min-width: 40rem;
+  }
+  .admin-users {
     min-width: 40rem;
   }
   .carrier_market table {

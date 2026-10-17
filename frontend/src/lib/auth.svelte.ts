@@ -81,6 +81,22 @@ async function logout() {
 	store(null);
 }
 
+/**
+ * Re-read the user from the server: the stored copy can be stale (a role
+ * changed, the account disabled, a session from before roles existed). A 401
+ * ends the session; a network failure keeps it.
+ */
+async function refresh() {
+	if (!session) return;
+	const res = await api('/api/auth/me').catch(() => null);
+	if (!res) return;
+	if (res.status === 401) {
+		store(null);
+		return;
+	}
+	if (res.ok && session) store({ ...session, user: (await res.json()) as User });
+}
+
 export const auth = {
 	get user(): User | null {
 		return session?.user ?? null;
@@ -89,7 +105,11 @@ export const auth = {
 	get token(): string | null {
 		return session?.token ?? null;
 	},
+	get isAdmin(): boolean {
+		return session?.user.role === 'admin';
+	},
 	login,
 	register,
-	logout
+	logout,
+	refresh
 };
