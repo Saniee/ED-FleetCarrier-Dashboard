@@ -66,7 +66,7 @@ mod tests {
     fn zip_holds_the_plugin_under_one_folder() {
         let bytes = ZIP.as_ref().unwrap().clone();
         let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
-        let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
+        let names: Vec<String> = archive.file_names().map(|n| n.unwrap().into_owned()).collect();
         let root = format!("{}/", embedded::NAME);
         assert!(names.iter().all(|n| n.starts_with(&root)), "{names:?}");
         assert!(names.iter().all(|n| !n.contains("__pycache__")), "{names:?}");

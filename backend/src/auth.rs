@@ -12,6 +12,7 @@ use axum::{
 };
 use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
+use std::sync::LazyLock;
 
 use crate::{
     app_state::AppState,
@@ -56,6 +57,26 @@ pub async fn verify_password(password: String, hash: String) -> bool {
     })
     .await
     .unwrap_or(false)
+}
+
+/// A hash nobody's password matches, checked when a login names no account so
+/// that it takes as long as a wrong password: the timing doesn't tell which
+/// usernames exist.
+static DUMMY_HASH: LazyLock<String> = LazyLock::new(|| {
+    Argon2::default()
+        .hash_password(b"no account has this password", &SaltString::generate(&mut OsRng))
+        .expect("argon2 hashes a constant")
+        .to_string()
+});
+
+/// Spend the time of a password check on [`DUMMY_HASH`].
+pub async fn verify_nothing(password: String) {
+    let _ = tokio::task::spawn_blocking(move || {
+        if let Ok(parsed) = PasswordHash::new(&DUMMY_HASH) {
+            let _ = Argon2::default().verify_password(password.as_bytes(), &parsed);
+        }
+    })
+    .await;
 }
 
 fn bearer(parts: &Parts) -> Option<&str> {

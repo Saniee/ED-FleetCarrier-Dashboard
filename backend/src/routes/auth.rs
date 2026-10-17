@@ -67,8 +67,10 @@ pub async fn login(
         .await
         .map_err(internal)?;
 
-    // Unknown user and wrong password are indistinguishable to the caller.
+    // Unknown user and wrong password are indistinguishable to the caller, in
+    // the answer and in how long it takes.
     let Some(login) = found else {
+        auth::verify_nothing(body.password).await;
         return Err(StatusCode::UNAUTHORIZED);
     };
     if !auth::verify_password(body.password, login.password_hash).await {

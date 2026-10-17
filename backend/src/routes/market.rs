@@ -68,7 +68,8 @@ async fn handle(state: &AppState, ingest: Ingest, payload: MarketEvent) -> Inges
     if let Access::Skip = ingest
         .check(&state.db_pool, Some(carrier_id), true)
         .await
-        .map_err(|s| (s, "forbidden".to_string()))?
+        // Visitor events are never refused, so this is a server error.
+        .map_err(|s| (s, "internal error".to_string()))?
     {
         return Ok((
             StatusCode::ACCEPTED,

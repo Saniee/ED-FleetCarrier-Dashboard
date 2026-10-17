@@ -123,9 +123,9 @@ export interface AdminStats {
 	reporters: {
 		user_id: number;
 		username: string | null;
-		stored: number | null;
-		ignored: number | null;
-		refused: number | null;
+		stored: number;
+		ignored: number;
+		refused: number;
 		last_day: string;
 	}[];
 	/** Most events first. `recent` counts the events received in the range. */

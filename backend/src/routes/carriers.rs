@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::{
-    app_state::AppState,
+    app_state::{AppState, Update},
     auth::{AuthUser, Viewer},
     db::carriers,
     error::internal,
@@ -50,6 +50,19 @@ pub async fn resolve_visible(
         return Err(StatusCode::NOT_FOUND);
     }
     Ok(c.carrier_id)
+}
+
+/// Send a carrier's current row to its open streams after a change no ingest
+/// announces (visibility, owner, moderation), so they update or, if the viewer
+/// may no longer read it, end. Best effort: a failure is only logged.
+pub async fn publish(state: &AppState, carrier_id: i64) {
+    match carriers::get(&state.db_pool, carrier_id).await {
+        Ok(Some(snapshot)) => {
+            let _ = state.tx.send(Update::Carrier(carrier_id, snapshot));
+        }
+        Ok(None) => {}
+        Err(err) => eprintln!("could not publish carrier {carrier_id}: {err}"),
+    }
 }
 
 #[derive(Deserialize)]
@@ -120,7 +133,10 @@ pub async fn release(
         .await
         .map_err(internal)?
     {
-        true => Ok(StatusCode::NO_CONTENT),
+        true => {
+            publish(&state, carrier_id).await;
+            Ok(StatusCode::NO_CONTENT)
+        }
         false => Err(StatusCode::FORBIDDEN),
     }
 }
@@ -168,9 +184,12 @@ pub async fn update_settings(
         body.is_squadron,
     )
     .await
-        .map_err(internal)?
+    .map_err(internal)?
     {
-        true => Ok(StatusCode::NO_CONTENT),
+        true => {
+            publish(&state, carrier_id).await;
+            Ok(StatusCode::NO_CONTENT)
+        }
         false => Err(StatusCode::FORBIDDEN),
     }
 }

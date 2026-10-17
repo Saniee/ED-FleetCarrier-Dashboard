@@ -493,6 +493,7 @@ pub async fn set_carrier_owner(
         .await
         .map_err(internal_msg)?;
     tx.commit().await.map_err(internal_msg)?;
+    super::carriers::publish(&state, id).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -525,6 +526,7 @@ pub async fn hide_carrier(
         .await
         .map_err(internal_msg)?;
     tx.commit().await.map_err(internal_msg)?;
+    super::carriers::publish(&state, id).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -544,6 +546,7 @@ pub async fn unhide_carrier(
         .await
         .map_err(internal_msg)?;
     tx.commit().await.map_err(internal_msg)?;
+    super::carriers::publish(&state, id).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -44,9 +44,12 @@ pub async fn count(pool: &PgPool, user_id: i64, kind: Kind, outcome: Outcome) ->
 
 /// The admin overview for the last `days` days (today included): storage,
 /// ingest per day and per account, the biggest carriers and account activity.
+/// `since.at` is the range's first UTC midnight, so timestamps are cut on UTC
+/// days whatever the database's time zone.
 pub async fn overview(pool: &PgPool, days: i32) -> sqlx::Result<Value> {
     sqlx::query_scalar(
-        "WITH since AS (SELECT (now() AT TIME ZONE 'UTC')::date - ($1 - 1) AS day)
+        "WITH since AS (SELECT d AS day, d::timestamp AT TIME ZONE 'UTC' AS at
+                        FROM (SELECT (now() AT TIME ZONE 'UTC')::date - ($1 - 1) AS d) s)
          SELECT jsonb_build_object(
            'days', $1,
            'since', (SELECT day FROM since),
@@ -66,9 +69,9 @@ pub async fn overview(pool: &PgPool, days: i32) -> sqlx::Result<Value> {
                    'last_day', r.last_day)
                  ORDER BY r.stored + r.ignored + r.refused DESC), '[]')
                FROM (SELECT user_id,
-                            sum(count) FILTER (WHERE outcome = 'stored') AS stored,
-                            sum(count) FILTER (WHERE outcome = 'ignored') AS ignored,
-                            sum(count) FILTER (WHERE outcome = 'refused') AS refused,
+                            coalesce(sum(count) FILTER (WHERE outcome = 'stored'), 0) AS stored,
+                            coalesce(sum(count) FILTER (WHERE outcome = 'ignored'), 0) AS ignored,
+                            coalesce(sum(count) FILTER (WHERE outcome = 'refused'), 0) AS refused,
                             max(day) AS last_day
                      FROM ingest_stats WHERE day >= (SELECT day FROM since)
                      GROUP BY user_id
@@ -81,7 +84,7 @@ pub async fn overview(pool: &PgPool, days: i32) -> sqlx::Result<Value> {
                  ORDER BY e.events DESC), '[]')
                FROM (SELECT carrier,
                             count(*) AS events,
-                            count(*) FILTER (WHERE received_at >= (SELECT day FROM since)) AS recent,
+                            count(*) FILTER (WHERE received_at >= (SELECT at FROM since)) AS recent,
                             sum(pg_column_size(json_data)) AS bytes,
                             max(received_at) AS last_received
                      FROM carrier_events WHERE carrier IS NOT NULL
@@ -94,11 +97,11 @@ pub async fn overview(pool: &PgPool, days: i32) -> sqlx::Result<Value> {
                'reporting', (SELECT count(DISTINCT user_id) FROM ingest_stats
                              WHERE user_id <> 0 AND day >= (SELECT day FROM since)),
                'signed_in', (SELECT count(DISTINCT user_id) FROM sessions
-                             WHERE created_at >= (SELECT day FROM since)),
+                             WHERE created_at >= (SELECT at FROM since)),
                'live_sessions', (SELECT count(*) FROM sessions WHERE expires_at > now()),
                'signups_daily', (SELECT coalesce(jsonb_agg(jsonb_build_object('day', day, 'count', n) ORDER BY day), '[]')
                    FROM (SELECT (created_at AT TIME ZONE 'UTC')::date AS day, count(*) AS n FROM users
-                         WHERE created_at >= (SELECT day FROM since) GROUP BY 1) s)),
+                         WHERE created_at >= (SELECT at FROM since) GROUP BY 1) s)),
            'carrier_counts', jsonb_build_object(
                'total', (SELECT count(*) FROM carriers),
                'owned', (SELECT count(*) FROM carriers WHERE owner_id IS NOT NULL),

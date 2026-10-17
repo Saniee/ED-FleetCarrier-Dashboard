@@ -48,7 +48,10 @@ async fn handle(state: &AppState, ingest: Ingest, payload: CarrierEvent) -> Inge
     if let Access::Skip = ingest
         .check(&state.db_pool, payload.carrier_id(), is_visitor_event(&payload))
         .await
-        .map_err(|s| (s, "carrier belongs to another user".to_string()))?
+        .map_err(|s| match s {
+            StatusCode::FORBIDDEN => (s, "carrier belongs to another user".to_string()),
+            _ => (s, "internal error".to_string()),
+        })?
     {
         return Ok((
             StatusCode::ACCEPTED,

@@ -147,9 +147,9 @@
                     <span class="muted">deleted account #{r.user_id}</span>
                   {/if}
                 </td>
-                <td>{formatNumber(r.stored ?? 0)}</td>
-                <td>{formatNumber(r.ignored ?? 0)}</td>
-                <td>{formatNumber(r.refused ?? 0)}</td>
+                <td>{formatNumber(r.stored)}</td>
+                <td>{formatNumber(r.ignored)}</td>
+                <td>{formatNumber(r.refused)}</td>
                 <td>{r.last_day}</td>
               </tr>
             {/each}

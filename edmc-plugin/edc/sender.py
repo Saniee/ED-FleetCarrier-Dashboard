@@ -163,8 +163,12 @@ class Sender:
 
         if r.ok:
             return "ok", str(r.status_code)
-        if r.status_code in (401, 403):
-            return "retry", f"auth failed ({r.status_code}) - check token"
+        if r.status_code == 401:
+            return "retry", "auth failed (401) - check token"
+        if r.status_code == 403:
+            # The carrier belongs to another account. Retrying can't change
+            # that, and would hold up every event queued behind this one.
+            return "drop", "carrier belongs to another account"
         if r.status_code in (408, 425, 429) or r.status_code >= 500:
             return "retry", f"server error {r.status_code}"
         return "drop", f"HTTP {r.status_code}"

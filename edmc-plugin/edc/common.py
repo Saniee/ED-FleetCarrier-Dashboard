@@ -7,7 +7,7 @@ import os
 from config import appname  # type: ignore  # provided by EDMC
 
 PLUGIN_NAME = "ed-commander"
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 # EDMC logs a plugin under "<appname>.<plugin folder>"; use the same name so our
 # lines are attributed to this plugin in EDMarketConnector.log.
