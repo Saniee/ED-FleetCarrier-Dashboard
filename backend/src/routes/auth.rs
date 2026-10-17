@@ -29,7 +29,7 @@ pub async fn register(
     State(state): State<AppState>,
     Json(body): Json<Credentials>,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
-    if !state.registration_open {
+    if !super::admin::registration_open(&state).await.map_err(internal_msg)? {
         return Err((StatusCode::FORBIDDEN, "registration is closed".into()));
     }
 

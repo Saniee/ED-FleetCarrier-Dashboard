@@ -12,8 +12,15 @@
   let {
     userId,
     onchange,
+    onhistory,
     onclose
-  }: { userId: number; onchange: () => void; onclose: () => void } = $props();
+  }: {
+    userId: number;
+    onchange: () => void;
+    /** Show the audit log for this account. */
+    onhistory: (user: { id: number; name: string }) => void;
+    onclose: () => void;
+  } = $props();
 
   let dialog: HTMLDialogElement;
   let user = $state<AdminUserDetail | null>(null);
@@ -200,6 +207,10 @@
     {/if}
 
     <div class="modal__foot">
+      {#if user}
+        {@const u = user}
+        <button onclick={() => onhistory({ id: u.id, name: u.username })}>History</button>
+      {/if}
       <button onclick={() => dialog.close()}>Close</button>
     </div>
   </div>

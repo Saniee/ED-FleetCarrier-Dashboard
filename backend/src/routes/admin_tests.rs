@@ -243,3 +243,72 @@ async fn sessions_and_tokens_are_revoked_per_user(pool: PgPool) {
     assert_eq!(call(&app, Method::GET, "/api/auth/me", Some(&cmdr_session), None).await.0, StatusCode::UNAUTHORIZED);
     assert_eq!(call(&app, Method::GET, "/api/auth/me", Some(&other_session), None).await.0, StatusCode::OK);
 }
+
+#[sqlx::test]
+async fn registration_switch_overrides_the_environment(pool: PgPool) {
+    let app = app(&pool);
+    let (_, boss) = user(&pool, "boss", "admin").await;
+    let (_, plain) = user(&pool, "plain", "user").await;
+    let register = |name: &str| json!({ "username": name, "password": "correct horse battery" });
+
+    assert_eq!(call(&app, Method::GET, "/api/admin/settings", Some(&plain), None).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(call(&app, Method::PUT, "/api/admin/settings", Some(&plain), Some(json!({ "registration": "closed" }))).await.0, StatusCode::FORBIDDEN);
+
+    // The environment (open, in `app`) applies until something is stored.
+    let (_, s) = call(&app, Method::GET, "/api/admin/settings", Some(&boss), None).await;
+    assert_eq!(s["registration"], json!({ "open": true, "setting": null, "env": true }));
+
+    let (status, s) = call(&app, Method::PUT, "/api/admin/settings", Some(&boss), Some(json!({ "registration": "closed" }))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(s["registration"]["open"], false);
+    assert_eq!(call(&app, Method::POST, "/api/auth/register", None, Some(register("late"))).await.0, StatusCode::FORBIDDEN);
+
+    // Same value again: no change, no log entry.
+    call(&app, Method::PUT, "/api/admin/settings", Some(&boss), Some(json!({ "registration": "closed" }))).await;
+    call(&app, Method::PUT, "/api/admin/settings", Some(&boss), Some(json!({ "registration": "default" }))).await;
+    assert_eq!(call(&app, Method::POST, "/api/auth/register", None, Some(register("early"))).await.0, StatusCode::CREATED);
+
+    assert_eq!(call(&app, Method::PUT, "/api/admin/settings", Some(&boss), Some(json!({ "registration": "maybe" }))).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let log: Vec<Value> = sqlx::query_scalar("SELECT detail FROM admin_actions WHERE action = 'settings.registration' ORDER BY id")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(log, vec![
+        json!({ "from": null, "to": false, "env": true }),
+        json!({ "from": false, "to": null, "env": true }),
+    ]);
+}
+
+#[sqlx::test]
+async fn audit_log_pages_newest_first_and_filters_by_account(pool: PgPool) {
+    let app = app(&pool);
+    let (boss_id, boss) = user(&pool, "boss", "admin").await;
+    let (a, _) = user(&pool, "alpha", "user").await;
+    let (b, _) = user(&pool, "bravo", "user").await;
+
+    call(&app, Method::POST, &format!("/api/admin/users/{a}/disable"), Some(&boss), Some(json!({ "reason": "spam" }))).await;
+    call(&app, Method::POST, &format!("/api/admin/users/{a}/enable"), Some(&boss), None).await;
+    call(&app, Method::DELETE, &format!("/api/admin/users/{b}"), Some(&boss), None).await;
+
+    assert_eq!(call(&app, Method::GET, "/api/admin/audit", None, None).await.0, StatusCode::UNAUTHORIZED);
+
+    let (status, page) = call(&app, Method::GET, "/api/admin/audit?per_page=2", Some(&boss), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page["total"], 3);
+    assert_eq!(page["total_pages"], 2);
+    let first = &page["items"][0];
+    assert_eq!(first["action"], "user.delete");
+    // Deleted, so the name comes from the entry itself.
+    assert_eq!(first["target"], "bravo");
+    assert_eq!(first["admin"], "boss");
+    assert_eq!(first["admin_id"], boss_id);
+    assert_eq!(page["items"][1]["action"], "user.enable");
+
+    let (_, page) = call(&app, Method::GET, "/api/admin/audit?page=2&per_page=2", Some(&boss), None).await;
+    assert_eq!(page["items"][0]["detail"]["reason"], "spam");
+
+    let (_, page) = call(&app, Method::GET, &format!("/api/admin/audit?user={a}"), Some(&boss), None).await;
+    assert_eq!(page["total"], 2);
+    assert!(page["items"].as_array().unwrap().iter().all(|i| i["target_id"] == a));
+}

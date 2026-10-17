@@ -17,7 +17,7 @@ Edit the `compose.yaml` file if needed. (Generally can be left untouched.)
 `cp compose.override.example.yaml compose.override.yaml` to edit the published ports.
 
 ## Accounts and ingest tokens
-1. Open the dashboard, go to **Login** and register. Once everyone who needs an account has one, set `ALLOW_REGISTRATION=0` and restart the backend to close registration.
+1. Open the dashboard, go to **Login** and register. Once everyone who needs an account has one, close registration from **Admin → Settings** (or set `ALLOW_REGISTRATION=0` and restart the backend).
 2. On the **Account** page create an API token. It is shown once; only a hash is stored.
 3. In EDMC, open the plugin's settings tab and enter the API URL and that token. The plugin sends it in the `X-Ingest-Token` header.
 4. The first `CarrierStats` event from a token claims an unowned carrier (open Carrier Management in game). That is the only way to claim one. Owners choose its visibility (public, link only, owner only) and whether it is their squadron's carrier.
@@ -31,7 +31,7 @@ docker compose exec db psql -U <user> -d <db> -c "UPDATE carriers SET owner_id =
 | Variable | Default | Meaning |
 |---|---|---|
 | `TOKEN` | empty | Optional legacy shared ingest secret. Per-user tokens work without it; empty disables the legacy token. |
-| `ALLOW_REGISTRATION` | `1` | `0` closes `POST /api/auth/register`. |
+| `ALLOW_REGISTRATION` | `1` | `0` closes `POST /api/auth/register`. The default only: the admin dashboard's setting wins while one is set. |
 | `RATE_LIMIT` | `1` | Per-IP request limits: login/register 5 burst then 1 per 6 s, ingest 60 burst then 10/s, other API calls 60 burst then 20/s (over the limit: 429). `0` disables. |
 | `ALLOW_ANON_INGEST` | off | `1` accepts ingest with no token at all. Dev only. `scripts/reseed.ps1` takes a token instead (`-Token`, or `$env:ED_INGEST_TOKEN`). |
 | `DEV_CONSOLE` | off | `1` serves an API test page at `/dev`. Dev only. |
@@ -53,6 +53,8 @@ docker compose exec backend backend admin list
 Outside Docker, run the same from `backend/` with `cargo run -- admin ...`. Each change is written to the `admin_actions` audit log. A disabled account can't log in (403), its sessions stop working, and its ingest tokens are rejected.
 
 Admins manage accounts under `/api/admin/users`: search and inspect accounts, disable or re-enable them (with a reason), sign them out everywhere, revoke their tokens, change roles, and delete them. A disabled account's carriers are hidden from everyone but admins until it is re-enabled; deleting an account leaves its carriers unowned, history intact. An admin can't disable, demote or delete their own account, and the last active admin can't be removed.
+
+The dashboard's `/admin` page does the same from the browser, plus **Settings** (`/api/admin/settings`: open or close registration, or go back to `ALLOW_REGISTRATION`) and the **Audit log** (`/api/admin/audit?page=&user=`), newest first and filterable by account.
 
 ### Tests
 `cargo test` in `backend/` includes tests that need Postgres: each creates and drops its own temporary database through `DATABASE_URL` (from `backend/.env`), so that role needs permission to create databases. With the compose database running, the default user has it.

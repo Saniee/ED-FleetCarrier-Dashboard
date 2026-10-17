@@ -57,8 +57,13 @@ async fn main() {
     if state.anon_ingest {
         eprintln!("WARNING: ALLOW_ANON_INGEST is set; ingest accepts requests with no token. Dev only.");
     }
-    if !state.registration_open {
-        println!("Registration is closed.");
+    let registration = db::settings::get_bool(&state.db_pool, db::settings::REGISTRATION_OPEN)
+        .await
+        .ok()
+        .flatten();
+    if !registration.unwrap_or(state.registration_open) {
+        let from = if registration.is_some() { "admin dashboard" } else { "ALLOW_REGISTRATION" };
+        println!("Registration is closed ({from}).");
     }
 
     let addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());

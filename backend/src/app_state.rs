@@ -33,7 +33,8 @@ pub struct AppState {
     /// Accept ingest with no token at all (`ALLOW_ANON_INGEST=1`). Dev only.
     pub anon_ingest: bool,
     /// Whether `POST /api/auth/register` creates accounts (`ALLOW_REGISTRATION`,
-    /// on unless set to `0` / `false`).
+    /// on unless set to `0` / `false`). The default only: a value set from the
+    /// admin dashboard wins (see `routes::admin::registration_open`).
     pub registration_open: bool,
     /// Per-IP request limits (`RATE_LIMIT`, on unless set to `0` / `false`).
     pub rate_limit: bool,

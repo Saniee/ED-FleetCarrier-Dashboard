@@ -4,6 +4,9 @@
 //!
 //! Safeguards: an admin can't disable, delete or demote their own account, and
 //! nobody can remove the last active admin.
+//!
+//! Also the runtime settings (`/api/admin/settings`) and the audit log
+//! (`/api/admin/audit`).
 
 use axum::{
     Json,
@@ -19,6 +22,7 @@ use crate::{
     auth::AdminUser,
     db::{
         admin::{self, Target},
+        settings,
         users::{ROLE_ADMIN, ROLE_USER},
     },
     error::{internal, internal_msg},
@@ -259,4 +263,100 @@ pub async fn delete_user(
         .map_err(internal_msg)?;
     tx.commit().await.map_err(internal_msg)?;
     Ok(Json(json!({ "released_carriers": released })))
+}
+
+/// Whether registration is open: the dashboard's setting, else
+/// `ALLOW_REGISTRATION`.
+pub async fn registration_open(state: &AppState) -> sqlx::Result<bool> {
+    Ok(settings::get_bool(&state.db_pool, settings::REGISTRATION_OPEN)
+        .await?
+        .unwrap_or(state.registration_open))
+}
+
+async fn settings_view(state: &AppState) -> sqlx::Result<Value> {
+    let stored = settings::get_bool(&state.db_pool, settings::REGISTRATION_OPEN).await?;
+    Ok(json!({
+        "registration": {
+            "open": stored.unwrap_or(state.registration_open),
+            "setting": stored,
+            "env": state.registration_open,
+        }
+    }))
+}
+
+pub async fn get_settings(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+) -> Result<Json<Value>, StatusCode> {
+    settings_view(&state).await.map(Json).map_err(internal)
+}
+
+/// `default` removes the stored value so `ALLOW_REGISTRATION` applies again.
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum Registration {
+    Open,
+    Closed,
+    Default,
+}
+
+#[derive(Deserialize)]
+pub struct SettingsBody {
+    registration: Registration,
+}
+
+pub async fn update_settings(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Json(body): Json<SettingsBody>,
+) -> Result<Json<Value>, ApiError> {
+    let value = match body.registration {
+        Registration::Open => Some(true),
+        Registration::Closed => Some(false),
+        Registration::Default => None,
+    };
+
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let before = settings::set_bool(&mut tx, settings::REGISTRATION_OPEN, value)
+        .await
+        .map_err(internal_msg)?;
+    if before != value {
+        admin::record(&mut tx, Some(admin.0.id), "settings.registration", None,
+            json!({ "from": before, "to": value, "env": state.registration_open }))
+            .await
+            .map_err(internal_msg)?;
+    }
+    tx.commit().await.map_err(internal_msg)?;
+    settings_view(&state).await.map(Json).map_err(internal_msg)
+}
+
+#[derive(Deserialize)]
+pub struct AuditQuery {
+    #[serde(default = "default_page")]
+    page: i64,
+    #[serde(default = "default_per_page")]
+    per_page: i64,
+    user: Option<i64>,
+}
+
+pub async fn list_audit(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(q): Query<AuditQuery>,
+) -> Result<Json<Value>, StatusCode> {
+    let page = q.page.max(1);
+    let per_page = q.per_page.clamp(1, 100);
+
+    let (items, total) =
+        admin::list_actions(&state.db_pool, q.user, per_page, (page - 1).saturating_mul(per_page))
+            .await
+            .map_err(internal)?;
+
+    Ok(Json(json!({
+        "items": items,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": (total + per_page - 1) / per_page,
+    })))
 }

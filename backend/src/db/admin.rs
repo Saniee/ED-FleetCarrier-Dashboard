@@ -223,3 +223,41 @@ pub async fn user_detail(pool: &PgPool, id: i64) -> sqlx::Result<Option<Value>> 
     .fetch_optional(pool)
     .await
 }
+
+/// One page of the audit log, newest first, plus the total. `target` narrows it
+/// to one account. Names are the current ones where the account still exists,
+/// else the one recorded at the time; `admin` is null for the command line.
+pub async fn list_actions(
+    pool: &PgPool,
+    target: Option<i64>,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<(Vec<Value>, i64)> {
+    let total: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM admin_actions WHERE $1::bigint IS NULL OR target_id = $1",
+    )
+    .bind(target)
+    .fetch_one(pool)
+    .await?;
+
+    let items = sqlx::query_scalar(
+        "SELECT jsonb_build_object(
+             'id', a.id, 'action', a.action, 'created_at', a.created_at,
+             'admin_id', a.admin_id, 'admin', ad.username,
+             'target_id', a.target_id,
+             'target', coalesce(t.username, a.detail->>'username'),
+             'detail', a.detail)
+         FROM admin_actions a
+         LEFT JOIN users ad ON ad.id = a.admin_id
+         LEFT JOIN users t ON t.id = a.target_id
+         WHERE $1::bigint IS NULL OR a.target_id = $1
+         ORDER BY a.id DESC LIMIT $2 OFFSET $3",
+    )
+    .bind(target)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+
+    Ok((items, total))
+}

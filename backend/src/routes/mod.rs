@@ -127,7 +127,9 @@ pub fn router(app: AppState) -> Router {
         .route("/api/admin/users/{id}/disable", post(admin::disable_user))
         .route("/api/admin/users/{id}/enable", post(admin::enable_user))
         .route("/api/admin/users/{id}/sessions", delete(admin::revoke_sessions))
-        .route("/api/admin/users/{id}/tokens/{token_id}", delete(admin::revoke_token));
+        .route("/api/admin/users/{id}/tokens/{token_id}", delete(admin::revoke_token))
+        .route("/api/admin/settings", get(admin::get_settings).put(admin::update_settings))
+        .route("/api/admin/audit", get(admin::list_audit));
 
     let (credentials, ingest, general) = if app.rate_limit {
         (

@@ -5,6 +5,7 @@ pub mod commodities;
 pub mod body_names;
 pub mod users;
 pub mod admin;
+pub mod settings;
 
 use sqlx::PgPool;
 
