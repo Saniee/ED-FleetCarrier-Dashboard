@@ -20,17 +20,23 @@ Edit the `compose.yaml` file if needed. (Generally can be left untouched.)
 1. Open the dashboard, go to **Login** and register. Once everyone who needs an account has one, set `ALLOW_REGISTRATION=0` and restart the backend to close registration.
 2. On the **Account** page create an API token. It is shown once; only a hash is stored.
 3. In EDMC, open the plugin's settings tab and enter the API URL and that token. The plugin sends it in the `X-Ingest-Token` header.
-4. The first `CarrierStats` event from a token claims an unowned carrier. Owners choose its visibility (public, link only, owner only) and whether it is their squadron's carrier.
+4. The first `CarrierStats` event from a token claims an unowned carrier (open Carrier Management in game). That is the only way to claim one. Owners choose its visibility (public, link only, owner only) and whether it is their squadron's carrier.
+
+Journal events are not signed, so the server cannot prove who really owns a carrier. If someone claims a carrier that isn't theirs, release it directly in the database and let the real owner's plugin claim it again:
+
+```
+docker compose exec db psql -U <user> -d <db> -c "UPDATE carriers SET owner_id = NULL WHERE upper(callsign) = 'ABC-123';"
+```
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `TOKEN` | empty | Optional legacy shared ingest secret. Per-user tokens work without it; empty disables the legacy token. |
 | `ALLOW_REGISTRATION` | `1` | `0` closes `POST /api/auth/register`. |
 | `RATE_LIMIT` | `1` | Per-IP request limits: login/register 5 burst then 1 per 6 s, ingest 60 burst then 10/s, other API calls 60 burst then 20/s (over the limit: 429). `0` disables. |
-| `ALLOW_ANON_INGEST` | off | `1` accepts ingest with no token at all. Dev only (e.g. `scripts/reseed.ps1`). |
+| `ALLOW_ANON_INGEST` | off | `1` accepts ingest with no token at all. Dev only. `scripts/reseed.ps1` takes a token instead (`-Token`, or `$env:ED_INGEST_TOKEN`). |
 | `DEV_CONSOLE` | off | `1` serves an API test page at `/dev`. Dev only. |
 
-Rate limits key on the client IP from `X-Forwarded-For` / `X-Real-IP`, so the backend must sit behind the reverse proxy (compose binds it to loopback); exposed directly, those headers can be forged.
+Rate limits key on the client IP the reverse proxy reports: the last `X-Forwarded-For` entry (the one the proxy itself added, so client-supplied entries are ignored), then `X-Real-IP`. The backend must sit behind that proxy (compose binds it to loopback); exposed directly, those headers can be forged.
 
 Migrations run automatically when the backend starts.
 

@@ -15,8 +15,17 @@
   The backend must be running. The database is truncated through the compose
   service, so Docker must be up too.
 
+  Events are sent with an ingest token (Account page > Plugin API tokens), as
+  the EDMC plugin does. Truncating clears carrier ownership, but replaying the
+  journal's CarrierStats under your token claims the carrier back for you.
+
 .PARAMETER Url
   API base URL. Default http://127.0.0.1:8080
+
+.PARAMETER Token
+  Ingest token, sent as X-Ingest-Token. Defaults to $env:ED_INGEST_TOKEN, which
+  keeps the token out of shell history. Without one, the backend only accepts
+  the replay if ALLOW_ANON_INGEST=1.
 
 .PARAMETER JournalDir
   Folder holding Journal*.log. Defaults to the standard ED location.
@@ -43,7 +52,7 @@
   Do not replay Market.json after the carrier events.
 
 .EXAMPLE
-  ./scripts/reseed.ps1
+  $env:ED_INGEST_TOKEN = '<token from the Account page>'; ./scripts/reseed.ps1
 .EXAMPLE
   ./scripts/reseed.ps1 -DelayMs 120
 .EXAMPLE
@@ -56,6 +65,7 @@
 [CmdletBinding()]
 param(
 	[string]$Url = 'http://127.0.0.1:8080',
+	[string]$Token = $env:ED_INGEST_TOKEN,
 	[string]$JournalDir = (Join-Path $env:USERPROFILE 'Saved Games\Frontier Developments\Elite Dangerous'),
 	[int]$DelayMs = 400,
 	[int]$DelayMax = 0,
@@ -80,6 +90,13 @@ function Assert-Api {
 	} catch {
 		throw "API not reachable at $Url - start the backend first (cd backend; cargo run). $_"
 	}
+}
+
+function New-ApiClient {
+	$client = [System.Net.Http.HttpClient]::new()
+	$client.Timeout = [TimeSpan]::FromSeconds(30)
+	if ($Token) { $client.DefaultRequestHeaders.Add('X-Ingest-Token', $Token.Trim()) }
+	return $client
 }
 
 function Get-CarrierEvents {
@@ -114,8 +131,7 @@ function Invoke-Replay {
 
 	$toSend = if ($Limit -gt 0) { [Math]::Min($Limit, $Events.Count) } else { $Events.Count }
 
-	$client = [System.Net.Http.HttpClient]::new()
-	$client.Timeout = [TimeSpan]::FromSeconds(30)
+	$client = New-ApiClient
 
 	$ok = 0; $fail = 0
 	$sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -185,7 +201,7 @@ function Send-Market {
 		return
 	}
 
-	$client = [System.Net.Http.HttpClient]::new()
+	$client = New-ApiClient
 	$content = [System.Net.Http.StringContent]::new($json, [System.Text.Encoding]::UTF8, 'application/json')
 	try {
 		$res = $client.PostAsync("$Url/api/market/event", $content).GetAwaiter().GetResult()
@@ -209,6 +225,11 @@ $events = Get-CarrierEvents
 Write-Host "journal: $($events.Count) carrier events from $JournalDir" -ForegroundColor Cyan
 $pacing = if ($DelayMax -gt $DelayMs) { "$DelayMs-$DelayMax ms (random)" } else { "${DelayMs}ms" }
 Write-Host "target : $Url   delay: $pacing$(if ($Loop) { '   loop: on' })" -ForegroundColor Cyan
+if ($Token) {
+	Write-Host 'auth   : ingest token' -ForegroundColor Cyan
+} else {
+	Write-Host 'auth   : none - pass -Token or set $env:ED_INGEST_TOKEN unless the backend runs with ALLOW_ANON_INGEST=1' -ForegroundColor Yellow
+}
 
 $pass = 0
 do {
