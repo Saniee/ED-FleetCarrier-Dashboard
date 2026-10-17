@@ -6,10 +6,11 @@ use axum::{
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
+use super::carrier_event::IngestResult;
 use crate::{
     app_state::{AppState, Update},
     auth::{Access, Ingest, Viewer},
-    db::{carriers, commodities, market},
+    db::{carriers, commodities, market, stats::Kind},
     error::{internal, internal_msg},
     journal_definitions::MarketEvent,
 };
@@ -34,7 +35,13 @@ pub async fn post(
     State(state): State<AppState>,
     ingest: Ingest,
     Json(payload): Json<MarketEvent>,
-) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
+) -> IngestResult {
+    let result = handle(&state, ingest, payload).await;
+    super::carrier_event::count(&state, ingest, Kind::Market, &result).await;
+    result
+}
+
+async fn handle(state: &AppState, ingest: Ingest, payload: MarketEvent) -> IngestResult {
     if payload.event != "Market" {
         return Err((
             StatusCode::BAD_REQUEST,

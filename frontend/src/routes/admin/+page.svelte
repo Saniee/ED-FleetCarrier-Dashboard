@@ -11,9 +11,16 @@
   import AdminAudit from '$lib/components/AdminAudit.svelte';
   import AdminCarriers from '$lib/components/AdminCarriers.svelte';
   import AdminCarrierSettings from '$lib/components/AdminCarrierSettings.svelte';
+  import AdminStats from '$lib/components/AdminStats.svelte';
 
   const PER_PAGE = 25;
-  const TABS = { accounts: 'Accounts', carriers: 'Carriers', settings: 'Settings', audit: 'Audit log' } as const;
+  const TABS = {
+    accounts: 'Accounts',
+    carriers: 'Carriers',
+    traffic: 'Traffic',
+    settings: 'Settings',
+    audit: 'Audit log'
+  } as const;
   type Tab = keyof typeof TABS;
 
   const initialTab = route.url.searchParams.get('tab');
@@ -120,6 +127,8 @@
 
     {#if tab === 'settings'}
       <AdminSettings />
+    {:else if tab === 'traffic'}
+      <AdminStats {version} onopenuser={openUser} onopencarrier={openCarrier} />
     {:else if tab === 'carriers'}
       <AdminCarriers {version} onmanage={openCarrier} onopenuser={openUser} />
     {:else if tab === 'audit'}

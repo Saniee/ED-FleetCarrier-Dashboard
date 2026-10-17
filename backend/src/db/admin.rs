@@ -461,3 +461,15 @@ pub async fn carrier_detail(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Opti
     .fetch_optional(pool)
     .await
 }
+
+/// Delete a carrier's events whose journal timestamp is before `before`
+/// (`YYYY-MM-DD`; the stored timestamps are ISO 8601 UTC, so text order is time
+/// order). Returns how many went.
+pub async fn trim_carrier_events(conn: &mut PgConnection, carrier_id: i64, before: &str) -> sqlx::Result<u64> {
+    let done = sqlx::query("DELETE FROM carrier_events WHERE carrier = $1 AND timestamp < $2")
+        .bind(carrier_id)
+        .bind(before)
+        .execute(conn)
+        .await?;
+    Ok(done.rows_affected())
+}

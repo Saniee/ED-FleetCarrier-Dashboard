@@ -98,6 +98,8 @@
         return { before: 'Gave carrier', after: ` from ${d.owner ?? 'nobody'} to ${d.to_owner}` };
       case 'carrier.release':
         return { before: 'Released carrier', after: d.owner ? ` from ${d.owner}` : '' };
+      case 'carrier.trim':
+        return { before: 'Trimmed', after: `'s history before ${d.before} (${d.events} event${d.events === 1 ? '' : 's'})` };
       case 'carrier.delete':
         return { before: 'Deleted carrier', after: ` (${d.events} event${d.events === 1 ? '' : 's'})` };
       case 'settings.registration':

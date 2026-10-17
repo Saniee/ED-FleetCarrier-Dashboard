@@ -20,8 +20,10 @@ services:
   backend:
     profiles: ["prod"]
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      # The repo root, not ./backend: the build embeds ../edmc-plugin for the
+      # plugin download.
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       TOKEN: ${TOKEN:-}

@@ -32,6 +32,9 @@
   let newOwner = $state('');
   let confirmCallsign = $state('');
   let confirmingDelete = $state(false);
+  // Trim: drop events from before this day (YYYY-MM-DD, UTC).
+  let trimBefore = $state('');
+  let trimmed = $state<number | null>(null);
 
   const base = $derived(`/api/admin/carriers/${carrierId}`);
   // What has to be typed to delete: the callsign, or the id without one.
@@ -83,6 +86,22 @@
       newOwner = '';
       await load();
     }
+  }
+
+  async function trim(e: Event) {
+    e.preventDefault();
+    trimmed = null;
+    busy = true;
+    error = '';
+    const res = await api(`${base}/events?before=${encodeURIComponent(trimBefore)}`, { method: 'DELETE' });
+    busy = false;
+    if (!res.ok) {
+      error = `Could not trim (${res.status}).`;
+      return;
+    }
+    trimmed = ((await res.json()) as { deleted: number }).deleted;
+    onchange();
+    await load();
   }
 
   async function remove() {
@@ -155,6 +174,21 @@
         <form class="modal__row" onsubmit={reassign}>
           <input bind:value={newOwner} placeholder="give to username" autocomplete="off" />
           <button type="submit" disabled={!newOwner.trim()}>Reassign</button>
+        </form>
+      </fieldset>
+
+      <fieldset class="modal__group" disabled={busy}>
+        <legend>History</legend>
+        <p class="option__hint">
+          Delete events from before a day (by their journal time), keeping the carrier and its newer
+          history.
+        </p>
+        <form class="modal__row" onsubmit={trim}>
+          <input type="date" bind:value={trimBefore} aria-label="Delete events before" />
+          <button type="submit" disabled={!trimBefore}>Trim</button>
+          {#if trimmed !== null}
+            <span class="option__hint">Deleted {formatNumber(trimmed)} event{trimmed === 1 ? '' : 's'}.</span>
+          {/if}
         </form>
       </fieldset>
 

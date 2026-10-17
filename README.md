@@ -19,7 +19,7 @@ Edit the `compose.yaml` file if needed. (Generally can be left untouched.)
 ## Accounts and ingest tokens
 1. Open the dashboard, go to **Login** and register. Once everyone who needs an account has one, close registration from **Admin → Settings** (or set `ALLOW_REGISTRATION=0` and restart the backend).
 2. On the **Account** page create an API token. It is shown once; only a hash is stored.
-3. In EDMC, open the plugin's settings tab and enter the API URL and that token. The plugin sends it in the `X-Ingest-Token` header.
+3. Download the EDMC plugin from your **Account** page (the backend serves the copy from this repo's `edmc-plugin/`, built in), unzip it into EDMC's plugins folder and restart EDMC. In EDMC, open the plugin's settings tab and enter the API URL and that token. The plugin sends it in the `X-Ingest-Token` header.
 4. The first `CarrierStats` event from a token claims an unowned carrier (open Carrier Management in game). That is the only way to claim one. Owners choose its visibility (public, link only, owner only) and whether it is their squadron's carrier.
 
 Journal events are not signed, so the server cannot prove who really owns a carrier. If someone claims a carrier that isn't theirs, release it directly in the database and let the real owner's plugin claim it again:
@@ -53,6 +53,8 @@ docker compose exec backend backend admin list
 Outside Docker, run the same from `backend/` with `cargo run -- admin ...`. Each change is written to the `admin_actions` audit log. A disabled account can't log in (403), its sessions stop working, and its ingest tokens are rejected.
 
 Admins manage accounts under `/api/admin/users`: search and inspect accounts, disable or re-enable them (with a reason), sign them out everywhere, revoke their tokens, change roles, and delete them. A disabled account's carriers are hidden from everyone but admins until it is re-enabled; deleting an account leaves its carriers unowned, history intact. An admin can't disable, demote or delete their own account, and the last active admin can't be removed.
+
+Admins also get **Traffic** (`/api/admin/stats?days=`): plugin uploads per day by outcome (stored, ignored, refused), the accounts and carriers sending the most, the biggest carrier histories, and table sizes. Uploads are counted from migration 0016 on. A carrier's history can be trimmed to events after a given day from its dialog.
 
 Carriers are moderated under `/api/admin/carriers`: list every carrier whatever its visibility, give one to another account, release it (the real owner's plugin claims it again with its next CarrierStats), hide it, or delete it with its history. A hidden carrier leaves the carrier list and answers 404 to everyone but its owner, who sees the reason, and admins; the owner's visibility setting can't undo it. Deleting is for clearing bad data such as an impostor holding a callsign: the next event about the carrier creates it again. Admins still can't open an owner-only carrier's page.
 

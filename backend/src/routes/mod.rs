@@ -6,6 +6,7 @@ mod carriers;
 mod carrier_event;
 mod carrier_stream;
 mod market;
+mod plugin;
 mod recent_events;
 mod healthz;
 
@@ -119,6 +120,8 @@ pub fn router(app: AppState) -> Router {
         .route("/api/carriers/{callsign}/market", get(market::get_by_callsign))
         .route("/api/carriers/{callsign}/stream", get(carrier_stream::stream_by_callsign))
         .route("/api/auth/logout", post(auth::logout))
+        .route("/api/plugin", get(plugin::info))
+        .route("/api/plugin/download", get(plugin::download))
         .route("/api/auth/me", get(auth::me))
         .route("/api/auth/tokens", get(auth::list_tokens).post(auth::create_token))
         .route("/api/auth/tokens/{id}", delete(auth::delete_token))
@@ -134,7 +137,9 @@ pub fn router(app: AppState) -> Router {
         .route("/api/admin/carriers/{id}", get(admin::get_carrier).delete(admin::delete_carrier))
         .route("/api/admin/carriers/{id}/owner", put(admin::set_carrier_owner))
         .route("/api/admin/carriers/{id}/hide", post(admin::hide_carrier))
-        .route("/api/admin/carriers/{id}/unhide", post(admin::unhide_carrier));
+        .route("/api/admin/carriers/{id}/unhide", post(admin::unhide_carrier))
+        .route("/api/admin/carriers/{id}/events", delete(admin::trim_carrier_events))
+        .route("/api/admin/stats", get(admin::stats));
 
     let (credentials, ingest, general) = if app.rate_limit {
         (

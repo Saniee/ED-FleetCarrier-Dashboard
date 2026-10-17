@@ -10,6 +10,7 @@
   import { VISIBILITY_LABEL } from '$lib/visibility';
   import CarrierSettings from '$lib/components/CarrierSettings.svelte';
   import RegenerateToken from '$lib/components/RegenerateToken.svelte';
+  import PluginDownload from '$lib/components/PluginDownload.svelte';
   import { motion } from '$lib/motion.svelte';
 
   interface ApiToken {
@@ -128,6 +129,8 @@
         />
       {/if}
     </section>
+
+    <PluginDownload />
 
     <section class="section">
       <div class="history__head">

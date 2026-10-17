@@ -4,17 +4,47 @@ use serde_json::{Value, json};
 use crate::{
     app_state::{AppState, Update},
     auth::{Access, Ingest},
-    db::{body_names, carriers, log_event},
+    db::{
+        body_names, carriers, log_event,
+        stats::{self, Kind, Outcome},
+    },
     edsm,
     error::internal_msg,
     journal_definitions::{CarrierEvent, CarrierLocation},
 };
 
+pub type IngestResult = Result<(StatusCode, Json<Value>), (StatusCode, String)>;
+
 pub async fn post(
     State(state): State<AppState>,
     ingest: Ingest,
     Json(payload): Json<CarrierEvent>,
-) -> Result<(StatusCode, Json<Value>), (StatusCode, String)> {
+) -> IngestResult {
+    let result = handle(&state, ingest, payload).await;
+    count(&state, ingest, Kind::Carrier, &result).await;
+    result
+}
+
+/// Count an ingest request for the traffic statistics. A failure to count is
+/// logged, never passed on to the plugin. Server errors aren't counted: they
+/// say nothing about the traffic.
+pub async fn count(state: &AppState, ingest: Ingest, kind: Kind, result: &IngestResult) {
+    let outcome = match result {
+        Ok((_, Json(body))) if body["stored"] == false => Outcome::Ignored,
+        Ok(_) => Outcome::Stored,
+        Err((status, _)) if status.is_client_error() => Outcome::Refused,
+        Err(_) => return,
+    };
+    let user_id = match ingest {
+        Ingest::User(id) => id,
+        Ingest::Legacy => 0,
+    };
+    if let Err(err) = stats::count(&state.db_pool, user_id, kind, outcome).await {
+        eprintln!("ingest stats: {err}");
+    }
+}
+
+async fn handle(state: &AppState, ingest: Ingest, payload: CarrierEvent) -> IngestResult {
     if let Access::Skip = ingest
         .check(&state.db_pool, payload.carrier_id(), is_visitor_event(&payload))
         .await
@@ -78,7 +108,7 @@ pub async fn post(
         // blanked any name that no longer matches it, so fill the name back in
         // before the snapshot goes out.
         if let CarrierEvent::CarrierLocation(location) = &payload {
-            resolve_body_name(&state, id, location).await;
+            resolve_body_name(state, id, location).await;
         }
 
         carriers::set_last_event(&state.db_pool, id, event_id)

@@ -8,8 +8,8 @@
 //! Carriers (`/api/admin/carriers`): reassign, release, hide or delete any
 //! carrier. Admins still can't read an `owner_only` carrier's page.
 //!
-//! Also the runtime settings (`/api/admin/settings`) and the audit log
-//! (`/api/admin/audit`).
+//! Also the runtime settings (`/api/admin/settings`), the audit log
+//! (`/api/admin/audit`) and traffic and storage statistics (`/api/admin/stats`).
 
 use axum::{
     Json,
@@ -25,7 +25,7 @@ use crate::{
     auth::AdminUser,
     db::{
         admin::{self, CarrierFilter, CarrierTarget, Subject, Target},
-        settings,
+        settings, stats,
         users::{ROLE_ADMIN, ROLE_USER},
     },
     error::{internal, internal_msg},
@@ -564,4 +564,57 @@ pub async fn delete_carrier(
         .map_err(internal_msg)?;
     tx.commit().await.map_err(internal_msg)?;
     Ok(Json(json!({ "events": events })))
+}
+
+#[derive(Deserialize)]
+pub struct TrimQuery {
+    /// `YYYY-MM-DD` (UTC): events from before this day go.
+    before: chrono::NaiveDate,
+}
+
+/// Delete a carrier's events from before a day (by the journal's timestamp),
+/// keeping the carrier and its newer history.
+pub async fn trim_carrier_events(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+    Query(q): Query<TrimQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let before = q.before.format("%Y-%m-%d").to_string();
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let carrier = carrier_target(&mut tx, id).await?;
+    let deleted = admin::trim_carrier_events(&mut tx, id, &before).await.map_err(internal_msg)?;
+    if deleted > 0 {
+        admin::record(&mut tx, Some(admin.0.id), "carrier.trim", Some(Subject::Carrier(id)),
+            carrier_entry(&carrier, json!({ "before": before, "events": deleted })))
+            .await
+            .map_err(internal_msg)?;
+    }
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(Json(json!({ "deleted": deleted })))
+}
+
+// --- Traffic and storage ----------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct StatsQuery {
+    #[serde(default = "default_days")]
+    days: i32,
+}
+
+fn default_days() -> i32 {
+    30
+}
+
+/// Storage, ingest traffic per day and per account, the biggest carriers and
+/// account activity over the last `days` days (1-365).
+pub async fn stats(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(q): Query<StatsQuery>,
+) -> Result<Json<Value>, StatusCode> {
+    stats::overview(&state.db_pool, q.days.clamp(1, 365))
+        .await
+        .map(Json)
+        .map_err(internal)
 }

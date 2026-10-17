@@ -104,3 +104,50 @@ export interface AuditFilter {
 	id: number;
 	name: string;
 }
+
+/** `GET /api/admin/stats?days=`. Days are UTC `YYYY-MM-DD`. */
+export interface AdminStats {
+	days: number;
+	/** First day of the range. */
+	since: string;
+	database_bytes: number;
+	/** Biggest first. `rows` is Postgres' estimate. */
+	tables: { name: string; rows: number; bytes: number }[];
+	ingest_daily: {
+		day: string;
+		kind: 'carrier' | 'market';
+		outcome: 'stored' | 'ignored' | 'refused';
+		count: number;
+	}[];
+	/** Most uploads first. `user_id` 0 is the legacy token or anonymous ingest. */
+	reporters: {
+		user_id: number;
+		username: string | null;
+		stored: number | null;
+		ignored: number | null;
+		refused: number | null;
+		last_day: string;
+	}[];
+	/** Most events first. `recent` counts the events received in the range. */
+	carriers: {
+		carrier_id: number;
+		callsign: string | null;
+		name: string | null;
+		events: number;
+		recent: number;
+		bytes: number;
+		last_received: string | null;
+	}[];
+	accounts: {
+		total: number;
+		admins: number;
+		disabled: number;
+		/** Accounts whose plugin uploaded in the range. */
+		reporting: number;
+		/** Accounts that logged in during the range. */
+		signed_in: number;
+		live_sessions: number;
+		signups_daily: { day: string; count: number }[];
+	};
+	carrier_counts: { total: number; owned: number; hidden: number; with_market: number };
+}

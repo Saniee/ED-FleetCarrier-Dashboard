@@ -583,13 +583,23 @@ body::before {
   /* Shared height: a field and its button line up in a row whatever their
      font sizes. */
   button,
+  a.button,
   input:not([type='checkbox'], [type='radio']),
   select {
     box-sizing: border-box;
     height: 1.75rem;
   }
 
-  button {
+  /* A link that does a button's job (a download): same look. */
+  a.button {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+    text-shadow: none;
+  }
+
+  button,
+  a.button {
     padding: 0 0.8rem;
     /* The fill is a second layer grown from the left, so selection can wipe in. */
     background: linear-gradient(var(--color-primary), var(--color-primary)) left / 0% 100% no-repeat,
@@ -924,6 +934,77 @@ body::before {
     color: var(--color-bg);
   }
 
+  /* Daily bar chart (admin traffic). Bars take shades of the theme colour. */
+  .chart {
+    margin: 0 0 0.5rem;
+  }
+  .chart__title {
+    margin: 1.25rem 0 0.5rem;
+    font-size: 0.85rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.8;
+  }
+  .chart__plot {
+    position: relative;
+    border-bottom: 1px solid var(--color-primary-5);
+    svg {
+      display: block;
+      width: 100%;
+    }
+  }
+  /* Top left: today's bar, the one most often full height, is on the right. */
+  .chart__max {
+    position: absolute;
+    top: 0;
+    left: 0;
+    font-family: var(--font-data);
+    font-size: 0.7rem;
+    opacity: 0.6;
+  }
+  .chart__axis,
+  .chart__legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.4rem 1rem;
+    font-family: var(--font-data);
+    font-size: 0.75rem;
+    opacity: 0.75;
+  }
+  .chart__legend {
+    justify-content: flex-start;
+    margin-top: 0.4rem;
+  }
+  .chart__swatch {
+    display: inline-block;
+    width: 0.7rem;
+    height: 0.7rem;
+    margin-right: 0.35rem;
+    vertical-align: -0.05rem;
+  }
+  .chart__fill--full { fill: var(--color-primary); background: var(--color-primary); }
+  .chart__fill--mid { fill: color-mix(in srgb, var(--color-primary) 55%, transparent); background: color-mix(in srgb, var(--color-primary) 55%, transparent); }
+  .chart__fill--low { fill: color-mix(in srgb, var(--color-primary) 25%, transparent); background: color-mix(in srgb, var(--color-primary) 25%, transparent); }
+  .chart__fill--text { fill: var(--color-text); background: var(--color-text); }
+  .admin-stats {
+    min-width: 32rem;
+  }
+
+  /* Numbered setup steps (the plugin install). */
+  .steps {
+    margin: 0.8rem 0;
+    padding-left: 1.4rem;
+    font-size: 0.9rem;
+    li {
+      margin: 0.35rem 0;
+    }
+  }
+  .steps__copy {
+    width: min(20rem, 100%);
+    margin: 0.2rem 0;
+  }
+
   /* Row buttons sit at the right edge, out of the data's way. */
   td.actions {
     width: 1%;
@@ -1005,6 +1086,7 @@ body::before {
     }
 
     button,
+    a.button,
     input:not([type='checkbox'], [type='radio']),
     select,
     .status,
@@ -1013,6 +1095,7 @@ body::before {
     }
     /* clip-path would cut off an outside outline, so focus draws inside. */
     button:focus-visible,
+    a.button:focus-visible,
     select:focus-visible {
       outline: none;
       box-shadow: inset 0 0 0 1px var(--color-text);
@@ -1253,7 +1336,8 @@ body::before {
     .terminal-content tbody tr {
       animation: row-print 0.05s steps(1) both;
     }
-    button {
+    button,
+    a.button {
       transition: none;
     }
     .jump--active {

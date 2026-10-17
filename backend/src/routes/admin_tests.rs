@@ -427,3 +427,81 @@ async fn reassign_release_and_delete_carriers(pool: PgPool) {
     // Given, then released: the delete came after, while unowned.
     assert_eq!(log["total"], 2);
 }
+
+async fn ingest(app: &Router, token: &str, body: Value) -> StatusCode {
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/market/event")
+        .header("x-ingest-token", token)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    app.clone().oneshot(req).await.unwrap().status()
+}
+
+#[sqlx::test]
+async fn ingest_is_counted_per_account_and_outcome(pool: PgPool) {
+    let app = app(&pool);
+    let (_, boss) = user(&pool, "boss", "admin").await;
+    let (cmdr, session) = user(&pool, "cmdr", "user").await;
+    carrier(&pool, 42, "ABC-123", Some(cmdr), "public").await;
+    let (_, created) = call(&app, Method::POST, "/api/auth/tokens", Some(&session), Some(json!({ "name": "plugin" }))).await;
+    let token = created["token"].as_str().unwrap().to_owned();
+    let market = |id: i64, station_type: &str| json!({
+        "timestamp": "2026-01-01T00:00:00Z", "event": "Market", "MarketID": id,
+        "StationType": station_type, "Items": [],
+    });
+
+    assert_eq!(ingest(&app, &token, market(42, "FleetCarrier")).await, StatusCode::ACCEPTED);
+    assert_eq!(ingest(&app, &token, market(42, "FleetCarrier")).await, StatusCode::ACCEPTED);
+    assert_eq!(ingest(&app, &token, market(7, "Coriolis")).await, StatusCode::ACCEPTED);
+    assert_eq!(ingest(&app, &token, json!({ "timestamp": "2026-01-01T00:00:00Z", "event": "Docked", "MarketID": 42 })).await, StatusCode::BAD_REQUEST);
+    // A bad token is turned away before anything is counted.
+    assert_eq!(ingest(&app, "nope", market(42, "FleetCarrier")).await, StatusCode::UNAUTHORIZED);
+
+    let (status, s) = call(&app, Method::GET, "/api/admin/stats?days=7", Some(&boss), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let by_outcome = |outcome: &str| -> i64 {
+        s["ingest_daily"].as_array().unwrap().iter()
+            .filter(|r| r["kind"] == "market" && r["outcome"] == outcome)
+            .map(|r| r["count"].as_i64().unwrap())
+            .sum()
+    };
+    assert_eq!((by_outcome("stored"), by_outcome("ignored"), by_outcome("refused")), (2, 1, 1));
+    let reporter = &s["reporters"][0];
+    assert_eq!(reporter["username"], "cmdr");
+    assert_eq!((reporter["stored"].as_i64(), reporter["ignored"].as_i64(), reporter["refused"].as_i64()), (Some(2), Some(1), Some(1)));
+    assert_eq!(s["accounts"]["total"], 2);
+    assert_eq!(s["accounts"]["reporting"], 1);
+    assert_eq!(s["carrier_counts"]["with_market"], 1);
+    assert!(s["database_bytes"].as_i64().unwrap() > 0);
+    assert!(s["tables"].as_array().unwrap().iter().any(|t| t["name"] == "carrier_events"));
+
+    assert_eq!(call(&app, Method::GET, "/api/admin/stats", Some(&session), None).await.0, StatusCode::FORBIDDEN);
+}
+
+#[sqlx::test]
+async fn trim_keeps_newer_history(pool: PgPool) {
+    let app = app(&pool);
+    let (_, boss) = user(&pool, "boss", "admin").await;
+    carrier(&pool, 1, "ABC-123", None, "public").await;
+    for ts in ["2025-12-31T23:59:59Z", "2026-01-01T00:00:00Z", "2026-02-01T12:00:00Z"] {
+        sqlx::query("INSERT INTO carrier_events (timestamp, event_name, json_data, carrier) VALUES ($1, 'CarrierStats', '{}', 1)")
+            .bind(ts)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(call(&app, Method::DELETE, "/api/admin/carriers/1/events?before=bogus", Some(&boss), None).await.0, StatusCode::BAD_REQUEST);
+    let (status, body) = call(&app, Method::DELETE, "/api/admin/carriers/1/events?before=2026-01-01", Some(&boss), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["deleted"], 1);
+    let (_, detail) = call(&app, Method::GET, "/api/admin/carriers/1", Some(&boss), None).await;
+    assert_eq!(detail["events"], 2);
+    // Nothing older left: nothing deleted, nothing logged.
+    call(&app, Method::DELETE, "/api/admin/carriers/1/events?before=2026-01-01", Some(&boss), None).await;
+    let (_, log) = call(&app, Method::GET, "/api/admin/audit?carrier=1", Some(&boss), None).await;
+    assert_eq!(log["total"], 1);
+    assert_eq!(log["items"][0]["detail"]["before"], "2026-01-01");
+}
