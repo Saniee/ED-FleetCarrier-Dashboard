@@ -1056,9 +1056,39 @@ body::before {
 
   /* The power-on sequence plays when the theme is switched on, not on every
      page load: theme.toggle() sets data-boot for the length of it. */
+  /* The screen opens from a line across the middle of the window: two fixed
+     shutters, so it is the window's middle on any page length (clipping
+     <body> used the document's middle, below the fold on long pages), and
+     scaling them stays on the compositor. */
+  .fx__boot {
+    display: none;
+  }
   [data-theme="alien"][data-boot] {
-    body {
-      animation: crt-power-on 0.5s ease-out;
+    .fx__boot {
+      display: block;
+      position: fixed;
+      inset: 0;
+      z-index: 99;
+      pointer-events: none;
+      &::before,
+      &::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 50%;
+        background: var(--color-bg);
+        animation: crt-shutter 0.5s ease-out both;
+      }
+      &::before {
+        top: 0;
+        transform-origin: top;
+        box-shadow: 0 1px 0 color-mix(in srgb, var(--color-text) 60%, transparent);
+      }
+      &::after {
+        bottom: 0;
+        transform-origin: bottom;
+      }
     }
     .fx__overlay::after {
       animation: vhs-roll 1.2s linear 0.3s both;
@@ -1079,7 +1109,13 @@ body::before {
     }
   }
 
-  @keyframes vhs-roll {
+  @keyframes crt-shutter {
+    0% { transform: scaleY(1); }
+    40% { transform: scaleY(0.99); }
+    100% { transform: scaleY(0); }
+  }
+
+    @keyframes vhs-roll {
     to { transform: translateY(calc(100vh + 8rem)); }
   }
 
