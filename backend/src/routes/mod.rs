@@ -88,12 +88,14 @@ fn limited<S: Clone + Send + Sync + 'static>(
 }
 
 pub fn router(app: AppState) -> Router {
-    // Each group has its own bucket per IP. Login/register run argon2 and are the
-    // brute-force target, so they are tightest; ingest can burst (journal
+    // Each group has its own bucket per IP. Login/register (and token
+    // regeneration) run argon2 and are the brute-force target, so they are tightest; ingest can burst (journal
     // replays); the health check stays unlimited.
     let credentials = Router::new()
         .route("/api/auth/register", post(auth::register))
-        .route("/api/auth/login", post(auth::login));
+        .route("/api/auth/login", post(auth::login))
+        // Checks the password too, so it shares the brute-force bucket.
+        .route("/api/auth/tokens/{id}/regenerate", post(auth::regenerate_token));
 
     let ingest = Router::new()
         .route("/api/carrier/event", post(carrier_event::post))

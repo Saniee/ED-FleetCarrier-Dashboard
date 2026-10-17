@@ -801,6 +801,23 @@ body::before {
   .modal__foot {
     display: flex;
     justify-content: flex-end;
+    gap: 0.5rem;
+  }
+
+  /* A panel that is itself a form (a prompt): stacked, not the inline row
+     page forms use. */
+  .carrier-page form.modal__form {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    margin: 0;
+    input:not([type='checkbox'], [type='radio']) {
+      flex: none;
+    }
+    .option__hint,
+    .error {
+      margin: 0;
+    }
   }
 
   /* A radio or checkbox with a label and a one-line explanation under it. */
@@ -840,6 +857,9 @@ body::before {
     width: 1%;
     text-align: right;
     white-space: nowrap;
+    button + button {
+      margin-left: 0.4rem;
+    }
   }
 
   /* ---------- narrow screens ---------- */

@@ -128,6 +128,26 @@ pub async fn delete_api_token(pool: &PgPool, user_id: i64, id: i64) -> sqlx::Res
     Ok(done.rows_affected() > 0)
 }
 
+/// Give a token a new secret, keeping its name. The old secret stops working
+/// at once. `None` when it does not exist or belongs to someone else.
+pub async fn regenerate_api_token(
+    pool: &PgPool,
+    user_id: i64,
+    id: i64,
+    token_hash: &[u8],
+) -> sqlx::Result<Option<ApiToken>> {
+    sqlx::query_as(
+        "UPDATE api_tokens SET token_hash = $3, created_at = now(), last_used_at = NULL
+         WHERE id = $1 AND user_id = $2
+         RETURNING id, name, created_at, last_used_at",
+    )
+    .bind(id)
+    .bind(user_id)
+    .bind(token_hash)
+    .fetch_optional(pool)
+    .await
+}
+
 /// Resolve an ingest token to its owner. `last_used_at` is stamped at most once
 /// a minute, so a busy plugin does not turn every event into a row write.
 pub async fn user_for_api_token(pool: &PgPool, token_hash: &[u8]) -> sqlx::Result<Option<i64>> {

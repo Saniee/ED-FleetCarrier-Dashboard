@@ -132,6 +132,41 @@ pub async fn create_token(
     Ok((StatusCode::CREATED, Json(json!({ "token": secret, "meta": meta }))))
 }
 
+#[derive(Deserialize)]
+pub struct Reauth {
+    password: String,
+}
+
+/// Replace a token's secret and return the new one, once. Secrets are stored
+/// only as hashes, so a lost one can't be shown again; this is the way back.
+/// The password is asked again so a left-open session can't mint secrets.
+pub async fn regenerate_token(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<i64>,
+    Json(body): Json<Reauth>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let hash = users::find_with_hash(&state.db_pool, &user.username)
+        .await
+        .map_err(internal_msg)?
+        .map(|(_, hash)| hash);
+    // 403, not 401: the session is fine, and the client logs out on 401.
+    let Some(hash) = hash else {
+        return Err((StatusCode::FORBIDDEN, "wrong password".into()));
+    };
+    if !auth::verify_password(body.password, hash).await {
+        return Err((StatusCode::FORBIDDEN, "wrong password".into()));
+    }
+
+    let secret = auth::new_token();
+    let meta = users::regenerate_api_token(&state.db_pool, user.id, id, &auth::hash_token(&secret))
+        .await
+        .map_err(internal_msg)?
+        .ok_or((StatusCode::NOT_FOUND, "no such token".into()))?;
+
+    Ok(Json(json!({ "token": secret, "meta": meta })))
+}
+
 pub async fn list_tokens(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,

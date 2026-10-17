@@ -8,6 +8,7 @@
   import { isSquadronHull } from '$lib/carrier-fuel';
   import { VISIBILITY_LABEL } from '$lib/visibility';
   import CarrierSettings from '$lib/components/CarrierSettings.svelte';
+  import RegenerateToken from '$lib/components/RegenerateToken.svelte';
   import { motion } from '$lib/motion.svelte';
 
   interface ApiToken {
@@ -21,6 +22,9 @@
   let carriers = $state<CarrierListItem[]>([]);
   let tokenName = $state('plugin');
   let newSecret = $state('');
+  // Which token the last secret belongs to, for the copy prompt.
+  let secretFor = $state('');
+  let regenerating = $state<ApiToken | null>(null);
   let error = $state('');
   // Callsign whose settings dialog is open. `?manage=` opens one on arrival
   // (the carrier page's Manage button links here).
@@ -50,6 +54,7 @@
       return;
     }
     newSecret = ((await res.json()) as { token: string }).token;
+    secretFor = tokenName;
     await loadAll();
   }
 
@@ -129,7 +134,7 @@
       </form>
       {#if newSecret}
         <div class="secret">
-          <p>Copy it now, it is shown only once:</p>
+          <p>New secret for {secretFor}. Copy it now, it is shown only once:</p>
           <input readonly value={newSecret} onfocus={(e) => e.currentTarget.select()} />
         </div>
       {/if}
@@ -145,12 +150,26 @@
                   <td>{t.name}</td>
                   <td>{formatTimestamp(t.created_at)}</td>
                   <td>{t.last_used_at ? formatTimestamp(t.last_used_at) : 'never'}</td>
-                  <td class="actions"><button onclick={() => revoke(t.id)}>Revoke</button></td>
+                  <td class="actions">
+                    <button onclick={() => (regenerating = t)}>Regenerate</button>
+                    <button onclick={() => revoke(t.id)}>Revoke</button>
+                  </td>
                 </tr>
               {/each}
             </tbody>
           </table>
         </div>
+      {/if}
+      {#if regenerating}
+        <RegenerateToken
+          token={regenerating}
+          ondone={(secret) => {
+            newSecret = secret;
+            secretFor = regenerating?.name ?? '';
+            void loadAll();
+          }}
+          onclose={() => (regenerating = null)}
+        />
       {/if}
     </section>
 
