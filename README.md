@@ -54,6 +54,8 @@ Outside Docker, run the same from `backend/` with `cargo run -- admin ...`. Each
 
 Admins manage accounts under `/api/admin/users`: search and inspect accounts, disable or re-enable them (with a reason), sign them out everywhere, revoke their tokens, change roles, and delete them. A disabled account's carriers are hidden from everyone but admins until it is re-enabled; deleting an account leaves its carriers unowned, history intact. An admin can't disable, demote or delete their own account, and the last active admin can't be removed.
 
+Carriers are moderated under `/api/admin/carriers`: list every carrier whatever its visibility, give one to another account, release it (the real owner's plugin claims it again with its next CarrierStats), hide it, or delete it with its history. A hidden carrier leaves the carrier list and answers 404 to everyone but its owner, who sees the reason, and admins; the owner's visibility setting can't undo it. Deleting is for clearing bad data such as an impostor holding a callsign: the next event about the carrier creates it again. Admins still can't open an owner-only carrier's page.
+
 The dashboard's `/admin` page does the same from the browser, plus **Settings** (`/api/admin/settings`: open or close registration, or go back to `ALLOW_REGISTRATION`) and the **Audit log** (`/api/admin/audit?page=&user=`), newest first and filterable by account.
 
 ### Tests

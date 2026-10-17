@@ -312,3 +312,118 @@ async fn audit_log_pages_newest_first_and_filters_by_account(pool: PgPool) {
     assert_eq!(page["total"], 2);
     assert!(page["items"].as_array().unwrap().iter().all(|i| i["target_id"] == a));
 }
+
+async fn carrier(pool: &PgPool, id: i64, callsign: &str, owner: Option<i64>, visibility: &str) {
+    sqlx::query("INSERT INTO carriers (carrier_id, callsign, name, owner_id, visibility) VALUES ($1, $2, 'Test', $3, $4)")
+        .bind(id)
+        .bind(callsign)
+        .bind(owner)
+        .bind(visibility)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[sqlx::test]
+async fn hidden_carriers_are_seen_only_by_owner_and_admins(pool: PgPool) {
+    let app = app(&pool);
+    let (_, boss) = user(&pool, "boss", "admin").await;
+    let (cmdr, cmdr_session) = user(&pool, "cmdr", "user").await;
+    let (_, other) = user(&pool, "other", "user").await;
+    carrier(&pool, 1, "ABC-123", Some(cmdr), "public").await;
+    carrier(&pool, 2, "SEC-RET", Some(cmdr), "owner_only").await;
+
+    assert_eq!(call(&app, Method::GET, "/api/admin/carriers", Some(&other), None).await.0, StatusCode::FORBIDDEN);
+    // Every carrier, owner_only too, with its owner.
+    let (_, list) = call(&app, Method::GET, "/api/admin/carriers", Some(&boss), None).await;
+    assert_eq!(list["total"], 2);
+    let (_, list) = call(&app, Method::GET, "/api/admin/carriers?q=cmdr", Some(&boss), None).await;
+    assert_eq!(list["total"], 2);
+    assert_eq!(list["items"][0]["owner"], "cmdr");
+
+    let (status, _) = call(&app, Method::POST, "/api/admin/carriers/1/hide", Some(&boss), Some(json!({ "reason": "offensive name" }))).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(call(&app, Method::POST, "/api/admin/carriers/1/hide", Some(&boss), Some(json!({}))).await.0, StatusCode::CONFLICT);
+
+    let (_, public) = call(&app, Method::GET, "/api/carriers", None, None).await;
+    assert_eq!(public["total"], 0);
+    assert_eq!(call(&app, Method::GET, "/api/carriers/ABC-123", None, None).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(call(&app, Method::GET, "/api/carriers/ABC-123", Some(&other), None).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(call(&app, Method::GET, "/api/carriers/ABC-123/events", None, None).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(call(&app, Method::GET, "/api/carriers/ABC-123", Some(&boss), None).await.0, StatusCode::OK);
+    // The owner still sees it, and why.
+    let (status, snapshot) = call(&app, Method::GET, "/api/carriers/ABC-123", Some(&cmdr_session), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(snapshot["moderation_reason"], "offensive name");
+    let (_, mine) = call(&app, Method::GET, "/api/carriers/mine", Some(&cmdr_session), None).await;
+    let hidden = mine.as_array().unwrap().iter().find(|c| c["callsign"] == "ABC-123").unwrap();
+    assert!(hidden["moderation_hidden_at"].is_string());
+    // Owner settings can't undo it.
+    call(&app, Method::PATCH, "/api/carriers/ABC-123", Some(&cmdr_session), Some(json!({ "visibility": "public" }))).await;
+    assert_eq!(call(&app, Method::GET, "/api/carriers/ABC-123", None, None).await.0, StatusCode::NOT_FOUND);
+
+    let (_, list) = call(&app, Method::GET, "/api/admin/carriers?filter=hidden", Some(&boss), None).await;
+    assert_eq!(list["total"], 1);
+
+    assert_eq!(call(&app, Method::POST, "/api/admin/carriers/1/unhide", Some(&boss), None).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(call(&app, Method::POST, "/api/admin/carriers/1/unhide", Some(&boss), None).await.0, StatusCode::CONFLICT);
+    assert_eq!(call(&app, Method::GET, "/api/carriers/ABC-123", None, None).await.0, StatusCode::OK);
+
+    // Admins get no way around owner_only: that is the owner's privacy.
+    assert_eq!(call(&app, Method::GET, "/api/carriers/SEC-RET", Some(&boss), None).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(call(&app, Method::POST, "/api/admin/carriers/99/hide", Some(&boss), Some(json!({}))).await.0, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test]
+async fn reassign_release_and_delete_carriers(pool: PgPool) {
+    let app = app(&pool);
+    let (_, boss) = user(&pool, "boss", "admin").await;
+    let (impostor, impostor_session) = user(&pool, "impostor", "user").await;
+    let (real, real_session) = user(&pool, "real_owner", "user").await;
+    carrier(&pool, 1, "ABC-123", Some(impostor), "public").await;
+    sqlx::query("INSERT INTO carrier_events (timestamp, event_name, json_data, carrier) VALUES ('2026-01-01T00:00:00Z', 'CarrierStats', '{}', 1)")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let owner = |name: Option<&str>| Some(json!({ "username": name }));
+    assert_eq!(call(&app, Method::PUT, "/api/admin/carriers/1/owner", Some(&boss), owner(Some("nobody"))).await.0, StatusCode::NOT_FOUND);
+    // Case-insensitive, like logging in.
+    assert_eq!(call(&app, Method::PUT, "/api/admin/carriers/1/owner", Some(&boss), owner(Some("REAL_OWNER"))).await.0, StatusCode::NO_CONTENT);
+    let (_, detail) = call(&app, Method::GET, "/api/admin/carriers/1", Some(&boss), None).await;
+    assert_eq!(detail["owner_id"], real);
+    assert_eq!(detail["events"], 1);
+    // The settings now answer to the new owner only.
+    assert_eq!(call(&app, Method::PATCH, "/api/carriers/ABC-123", Some(&impostor_session), Some(json!({ "visibility": "private" }))).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(call(&app, Method::PATCH, "/api/carriers/ABC-123", Some(&real_session), Some(json!({ "visibility": "private" }))).await.0, StatusCode::NO_CONTENT);
+
+    // Same owner again: nothing to log.
+    call(&app, Method::PUT, "/api/admin/carriers/1/owner", Some(&boss), owner(Some("real_owner"))).await;
+    assert_eq!(call(&app, Method::PUT, "/api/admin/carriers/1/owner", Some(&boss), owner(None)).await.0, StatusCode::NO_CONTENT);
+    let (_, detail) = call(&app, Method::GET, "/api/admin/carriers/1", Some(&boss), None).await;
+    assert!(detail["owner_id"].is_null());
+
+    let (status, body) = call(&app, Method::DELETE, "/api/admin/carriers/1", Some(&boss), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["events"], 1);
+    let left: (i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM carriers), (SELECT count(*) FROM carrier_events)")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, (0, 0));
+
+    // The carrier's history, under its callsign though it is gone.
+    let (_, log) = call(&app, Method::GET, "/api/admin/audit?carrier=1", Some(&boss), None).await;
+    let actions: Vec<&str> = log["items"].as_array().unwrap().iter().map(|i| i["action"].as_str().unwrap()).collect();
+    assert_eq!(actions, ["carrier.delete", "carrier.release", "carrier.reassign"]);
+    assert_eq!(log["items"][0]["target"], "ABC-123");
+    assert_eq!(log["items"][0]["target_kind"], "carrier");
+    assert_eq!(log["items"][2]["detail"]["owner"], "impostor");
+    assert_eq!(log["items"][2]["detail"]["to_owner"], "real_owner");
+    // Each owner's history includes what happened to their carrier.
+    let (_, log) = call(&app, Method::GET, &format!("/api/admin/audit?user={impostor}"), Some(&boss), None).await;
+    assert_eq!(log["total"], 1);
+    let (_, log) = call(&app, Method::GET, &format!("/api/admin/audit?user={real}"), Some(&boss), None).await;
+    // Given, then released: the delete came after, while unowned.
+    assert_eq!(log["total"], 2);
+}

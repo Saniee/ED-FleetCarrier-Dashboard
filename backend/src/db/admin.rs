@@ -3,6 +3,23 @@ use sqlx::{PgConnection, PgPool};
 
 use super::users::User;
 
+/// What an audit entry is about.
+#[derive(Clone, Copy)]
+pub enum Subject {
+    User(i64),
+    /// A `carrier_id`.
+    Carrier(i64),
+}
+
+impl Subject {
+    fn parts(self) -> (&'static str, i64) {
+        match self {
+            Subject::User(id) => ("user", id),
+            Subject::Carrier(id) => ("carrier", id),
+        }
+    }
+}
+
 /// Append to the audit log. Takes a connection so callers write it in the same
 /// transaction as the action it records. `admin_id` is `None` for the command
 /// line.
@@ -10,15 +27,18 @@ pub async fn record(
     conn: &mut PgConnection,
     admin_id: Option<i64>,
     action: &str,
-    target_id: Option<i64>,
+    subject: Option<Subject>,
     detail: Value,
 ) -> sqlx::Result<()> {
+    let (kind, id) = subject.map(Subject::parts).unzip();
     sqlx::query(
-        "INSERT INTO admin_actions (admin_id, action, target_id, detail) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO admin_actions (admin_id, action, target_kind, target_id, detail)
+         VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(admin_id)
     .bind(action)
-    .bind(target_id)
+    .bind(kind)
+    .bind(id)
     .bind(detail)
     .execute(conn)
     .await?;
@@ -224,40 +244,220 @@ pub async fn user_detail(pool: &PgPool, id: i64) -> sqlx::Result<Option<Value>> 
     .await
 }
 
-/// One page of the audit log, newest first, plus the total. `target` narrows it
-/// to one account. Names are the current ones where the account still exists,
-/// else the one recorded at the time; `admin` is null for the command line.
+/// One page of the audit log, newest first, plus the total. `subject` narrows
+/// it: to an account (including actions on carriers it owned or was given), or
+/// to a carrier. Names are the current ones where the account or carrier still
+/// exists, else the one recorded at the time; `admin` is null for the command
+/// line.
 pub async fn list_actions(
     pool: &PgPool,
-    target: Option<i64>,
+    subject: Option<Subject>,
     limit: i64,
     offset: i64,
 ) -> sqlx::Result<(Vec<Value>, i64)> {
-    let total: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM admin_actions WHERE $1::bigint IS NULL OR target_id = $1",
-    )
-    .bind(target)
+    let (kind, id) = subject.map(Subject::parts).unzip();
+    macro_rules! filter {
+        () => {
+            "($1::text IS NULL
+              OR (a.target_kind = $1 AND a.target_id = $2)
+              OR ($1 = 'user' AND a.target_kind = 'carrier'
+                  AND $2 IN ((a.detail->>'owner_id')::bigint, (a.detail->>'to_owner_id')::bigint)))"
+        };
+    }
+
+    let total: i64 = sqlx::query_scalar(concat!(
+        "SELECT count(*) FROM admin_actions a WHERE ",
+        filter!()
+    ))
+    .bind(kind)
+    .bind(id)
     .fetch_one(pool)
     .await?;
 
-    let items = sqlx::query_scalar(
+    let items = sqlx::query_scalar(concat!(
         "SELECT jsonb_build_object(
              'id', a.id, 'action', a.action, 'created_at', a.created_at,
              'admin_id', a.admin_id, 'admin', ad.username,
-             'target_id', a.target_id,
-             'target', coalesce(t.username, a.detail->>'username'),
+             'target_kind', a.target_kind, 'target_id', a.target_id,
+             'target', CASE a.target_kind
+                 WHEN 'user' THEN coalesce(t.username, a.detail->>'username')
+                 WHEN 'carrier' THEN coalesce(c.callsign, a.detail->>'callsign', a.target_id::text)
+             END,
              'detail', a.detail)
          FROM admin_actions a
          LEFT JOIN users ad ON ad.id = a.admin_id
-         LEFT JOIN users t ON t.id = a.target_id
-         WHERE $1::bigint IS NULL OR a.target_id = $1
-         ORDER BY a.id DESC LIMIT $2 OFFSET $3",
-    )
-    .bind(target)
+         LEFT JOIN users t ON a.target_kind = 'user' AND t.id = a.target_id
+         LEFT JOIN carriers c ON a.target_kind = 'carrier' AND c.carrier_id = a.target_id
+         WHERE ",
+        filter!(),
+        " ORDER BY a.id DESC LIMIT $3 OFFSET $4"
+    ))
+    .bind(kind)
+    .bind(id)
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)
     .await?;
 
     Ok((items, total))
+}
+
+/// A carrier an admin action is aimed at, locked for the transaction.
+#[derive(sqlx::FromRow)]
+pub struct CarrierTarget {
+    pub callsign: Option<String>,
+    pub owner_id: Option<i64>,
+    /// The owner's username.
+    pub owner: Option<String>,
+    pub hidden: bool,
+}
+
+pub async fn lock_carrier(conn: &mut PgConnection, carrier_id: i64) -> sqlx::Result<Option<CarrierTarget>> {
+    sqlx::query_as(
+        "SELECT c.callsign, c.owner_id, u.username AS owner,
+                c.moderation_hidden_at IS NOT NULL AS hidden
+         FROM carriers c LEFT JOIN users u ON u.id = c.owner_id
+         WHERE c.carrier_id = $1 FOR UPDATE OF c",
+    )
+    .bind(carrier_id)
+    .fetch_optional(conn)
+    .await
+}
+
+/// `(id, username)` of an account by name, case-insensitively.
+pub async fn find_user(conn: &mut PgConnection, username: &str) -> sqlx::Result<Option<(i64, String)>> {
+    sqlx::query_as("SELECT id, username FROM users WHERE lower(username) = lower($1)")
+        .bind(username)
+        .fetch_optional(conn)
+        .await
+}
+
+/// Give a carrier to `owner`, or with `None` leave it unowned.
+pub async fn set_carrier_owner(conn: &mut PgConnection, carrier_id: i64, owner: Option<i64>) -> sqlx::Result<()> {
+    sqlx::query("UPDATE carriers SET owner_id = $2 WHERE carrier_id = $1")
+        .bind(carrier_id)
+        .bind(owner)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
+/// Hide a carrier (with `Some`) or show it again (with `None`).
+pub async fn set_carrier_hidden(
+    conn: &mut PgConnection,
+    carrier_id: i64,
+    hidden: Option<Option<&str>>,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE carriers
+         SET moderation_hidden_at = CASE WHEN $2 THEN now() END,
+             moderation_reason = CASE WHEN $2 THEN $3 END
+         WHERE carrier_id = $1",
+    )
+    .bind(carrier_id)
+    .bind(hidden.is_some())
+    .bind(hidden.flatten())
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// Delete a carrier with its history and market. Returns how many events went.
+pub async fn delete_carrier(conn: &mut PgConnection, carrier_id: i64) -> sqlx::Result<i64> {
+    let events: i64 = sqlx::query_scalar("SELECT count(*) FROM carrier_events WHERE carrier = $1")
+        .bind(carrier_id)
+        .fetch_one(&mut *conn)
+        .await?;
+    sqlx::query("DELETE FROM carriers WHERE carrier_id = $1")
+        .bind(carrier_id)
+        .execute(conn)
+        .await?;
+    Ok(events)
+}
+
+/// The per-carrier fields of the admin carrier list and detail, as
+/// `jsonb_build_object` arguments over `carriers c LEFT JOIN users u` (the owner).
+macro_rules! carrier_fields {
+    () => {
+        "'carrier_id', c.carrier_id, 'callsign', c.callsign, 'name', c.name,
+         'star_system', c.star_system, 'visibility', c.visibility, 'updated_at', c.updated_at,
+         'owner_id', c.owner_id, 'owner', u.username, 'owner_disabled', u.disabled_at IS NOT NULL,
+         'moderation_hidden_at', c.moderation_hidden_at, 'moderation_reason', c.moderation_reason"
+    };
+}
+
+/// Which carriers the admin list shows.
+#[derive(Clone, Copy)]
+pub enum CarrierFilter {
+    All,
+    Hidden,
+    Unowned,
+}
+
+/// One page of every carrier, most recently active first, plus the total.
+/// `search` matches callsign, name, system or the owner's name.
+pub async fn list_carriers(
+    pool: &PgPool,
+    search: Option<&str>,
+    filter: CarrierFilter,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<(Vec<Value>, i64)> {
+    let pattern = search.map(|s| {
+        let escaped = s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        format!("%{escaped}%")
+    });
+    let filter = match filter {
+        CarrierFilter::All => "all",
+        CarrierFilter::Hidden => "hidden",
+        CarrierFilter::Unowned => "unowned",
+    };
+    macro_rules! filter {
+        () => {
+            " FROM carriers c LEFT JOIN users u ON u.id = c.owner_id
+             WHERE ($1::text IS NULL OR c.callsign ILIKE $1 OR c.name ILIKE $1
+                    OR c.star_system ILIKE $1 OR u.username ILIKE $1)
+               AND ($2 = 'all'
+                    OR ($2 = 'hidden' AND c.moderation_hidden_at IS NOT NULL)
+                    OR ($2 = 'unowned' AND c.owner_id IS NULL))"
+        };
+    }
+
+    let total: i64 = sqlx::query_scalar(concat!("SELECT count(*)", filter!()))
+        .bind(&pattern)
+        .bind(filter)
+        .fetch_one(pool)
+        .await?;
+
+    let items = sqlx::query_scalar(concat!(
+        "SELECT jsonb_build_object(",
+        carrier_fields!(),
+        ")",
+        filter!(),
+        " ORDER BY c.updated_at DESC NULLS LAST, c.carrier_id LIMIT $3 OFFSET $4"
+    ))
+    .bind(&pattern)
+    .bind(filter)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+
+    Ok((items, total))
+}
+
+/// One carrier with how much it stores.
+pub async fn carrier_detail(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<Value>> {
+    sqlx::query_scalar(concat!(
+        "SELECT jsonb_build_object(",
+        carrier_fields!(),
+        ",
+         'events', (SELECT count(*) FROM carrier_events e WHERE e.carrier = c.carrier_id),
+         'commodities', (SELECT count(*) FROM market_commodities m WHERE m.carrier_id = c.carrier_id))
+         FROM carriers c LEFT JOIN users u ON u.id = c.owner_id
+         WHERE c.carrier_id = $1"
+    ))
+    .bind(carrier_id)
+    .fetch_optional(pool)
+    .await
 }

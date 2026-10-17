@@ -20,7 +20,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
     response::Html,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use tower_governor::{
     GovernorError, GovernorLayer, governor::GovernorConfigBuilder, key_extractor::KeyExtractor,
@@ -129,7 +129,12 @@ pub fn router(app: AppState) -> Router {
         .route("/api/admin/users/{id}/sessions", delete(admin::revoke_sessions))
         .route("/api/admin/users/{id}/tokens/{token_id}", delete(admin::revoke_token))
         .route("/api/admin/settings", get(admin::get_settings).put(admin::update_settings))
-        .route("/api/admin/audit", get(admin::list_audit));
+        .route("/api/admin/audit", get(admin::list_audit))
+        .route("/api/admin/carriers", get(admin::list_carriers))
+        .route("/api/admin/carriers/{id}", get(admin::get_carrier).delete(admin::delete_carrier))
+        .route("/api/admin/carriers/{id}/owner", put(admin::set_carrier_owner))
+        .route("/api/admin/carriers/{id}/hide", post(admin::hide_carrier))
+        .route("/api/admin/carriers/{id}/unhide", post(admin::unhide_carrier));
 
     let (credentials, ingest, general) = if app.rate_limit {
         (

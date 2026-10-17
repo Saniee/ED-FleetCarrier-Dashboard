@@ -19,33 +19,37 @@ pub async fn resolve(state: &AppState, callsign: &str) -> Result<(i64, Option<i6
     carriers::find_by_callsign(&state.db_pool, callsign)
         .await
         .map_err(internal)?
-        .map(|(id, owner, _, _)| (id, owner))
+        .map(|c| (c.carrier_id, c.owner_id))
         .ok_or(StatusCode::NOT_FOUND)
 }
 
 /// The `carrier_id` behind a callsign, if `viewer` may read it. `owner_only`
-/// carriers answer 404 to everyone but the owner, so they aren't revealed, and
-/// a disabled account's carriers answer 404 to everyone but admins (moderation
-/// may be about the carrier itself).
+/// carriers answer 404 to everyone but the owner, so they aren't revealed; a
+/// disabled account's carriers answer 404 to everyone but admins (moderation
+/// may be about the carrier itself); and a carrier an admin hid answers 404 to
+/// everyone but its owner, who sees why, and admins.
 pub async fn resolve_visible(
     state: &AppState,
     callsign: &str,
     viewer: &Viewer,
 ) -> Result<i64, StatusCode> {
-    let (id, owner, visibility, owner_disabled) = carriers::find_by_callsign(&state.db_pool, callsign)
+    let c = carriers::find_by_callsign(&state.db_pool, callsign)
         .await
         .map_err(internal)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let is_owner = matches!((owner, &viewer.0), (Some(o), Some(u)) if o == u.id);
+    let is_owner = matches!((c.owner_id, &viewer.0), (Some(o), Some(u)) if o == u.id);
     let is_admin = viewer.0.as_ref().is_some_and(|u| u.is_admin());
-    if owner_disabled && !is_admin {
+    if c.owner_disabled && !is_admin {
         return Err(StatusCode::NOT_FOUND);
     }
-    if visibility == "owner_only" && !is_owner {
+    if c.hidden && !is_owner && !is_admin {
         return Err(StatusCode::NOT_FOUND);
     }
-    Ok(id)
+    if c.visibility == "owner_only" && !is_owner {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(c.carrier_id)
 }
 
 #[derive(Deserialize)]

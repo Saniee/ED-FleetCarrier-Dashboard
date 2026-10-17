@@ -146,6 +146,9 @@ export interface Carrier {
 	// Tenancy
 	owner_id: number | null;
 	visibility: Visibility;
+	/** Set while an admin has hidden the carrier: only the owner and admins see it. */
+	moderation_hidden_at: string | null;
+	moderation_reason: string | null;
 	/** Location last reported by someone other than the owner; show a `*`. */
 	location_unverified: boolean;
 	updated_at: string;
@@ -417,6 +420,9 @@ export interface CarrierListItem {
 	docking_access?: string | null;
 	location_unverified?: boolean;
 	visibility?: Visibility;
+	/** `/api/carriers/mine` only: set while an admin has hidden the carrier. */
+	moderation_hidden_at?: string | null;
+	moderation_reason?: string | null;
 	updated_at: string;
 }
 

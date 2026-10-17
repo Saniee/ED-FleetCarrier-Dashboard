@@ -101,10 +101,19 @@
             Manage
           </button>
         {/if}
+        {#if auth.isAdmin}
+          <button onclick={() => goto(`/admin?tab=carriers&carrier=${feed.carrier?.carrier_id}`)}>Moderate</button>
+        {/if}
       </div>
     </header>
     {#if feed.carrier.visibility === 'private'}<p class="muted">Private: not in the carrier list, reachable by link.</p>{/if}
     {#if feed.carrier.visibility === 'owner_only'}<p class="muted">Owner only: nobody else can see this carrier.</p>{/if}
+    {#if feed.carrier.moderation_hidden_at}
+      <p class="error">
+        Hidden by a moderator{feed.carrier.moderation_reason ? `: ${feed.carrier.moderation_reason}` : ''}.
+        Only {owner ? 'you' : 'the owner'} and admins can see this carrier.
+      </p>
+    {/if}
       <div class="stats">
         <div class="stat">
           <span class="stat__label">Fuel</span>

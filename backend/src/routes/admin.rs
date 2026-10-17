@@ -5,6 +5,9 @@
 //! Safeguards: an admin can't disable, delete or demote their own account, and
 //! nobody can remove the last active admin.
 //!
+//! Carriers (`/api/admin/carriers`): reassign, release, hide or delete any
+//! carrier. Admins still can't read an `owner_only` carrier's page.
+//!
 //! Also the runtime settings (`/api/admin/settings`) and the audit log
 //! (`/api/admin/audit`).
 
@@ -21,7 +24,7 @@ use crate::{
     app_state::AppState,
     auth::AdminUser,
     db::{
-        admin::{self, Target},
+        admin::{self, CarrierFilter, CarrierTarget, Subject, Target},
         settings,
         users::{ROLE_ADMIN, ROLE_USER},
     },
@@ -136,7 +139,7 @@ pub async fn disable_user(
     keep_an_admin(&target)?;
 
     admin::disable(&mut tx, id, reason).await.map_err(internal_msg)?;
-    admin::record(&mut tx, Some(admin.0.id), "user.disable", Some(id),
+    admin::record(&mut tx, Some(admin.0.id), "user.disable", Some(Subject::User(id)),
         json!({ "username": target.username, "reason": reason }))
         .await
         .map_err(internal_msg)?;
@@ -156,7 +159,7 @@ pub async fn enable_user(
     }
 
     admin::enable(&mut tx, id).await.map_err(internal_msg)?;
-    admin::record(&mut tx, Some(admin.0.id), "user.enable", Some(id),
+    admin::record(&mut tx, Some(admin.0.id), "user.enable", Some(Subject::User(id)),
         json!({ "username": target.username }))
         .await
         .map_err(internal_msg)?;
@@ -174,7 +177,7 @@ pub async fn revoke_sessions(
     let target = target(&mut tx, id).await?;
 
     let revoked = admin::revoke_sessions(&mut tx, id).await.map_err(internal_msg)?;
-    admin::record(&mut tx, Some(admin.0.id), "user.revoke_sessions", Some(id),
+    admin::record(&mut tx, Some(admin.0.id), "user.revoke_sessions", Some(Subject::User(id)),
         json!({ "username": target.username, "count": revoked }))
         .await
         .map_err(internal_msg)?;
@@ -194,7 +197,7 @@ pub async fn revoke_token(
         .await
         .map_err(internal_msg)?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "no such token"))?;
-    admin::record(&mut tx, Some(admin.0.id), "user.revoke_token", Some(id),
+    admin::record(&mut tx, Some(admin.0.id), "user.revoke_token", Some(Subject::User(id)),
         json!({ "username": target.username, "token_id": token_id, "token_name": name }))
         .await
         .map_err(internal_msg)?;
@@ -236,7 +239,7 @@ pub async fn update_user(
     }
 
     admin::set_role(&mut tx, id, role).await.map_err(internal_msg)?;
-    admin::record(&mut tx, Some(admin.0.id), "user.set_role", Some(id),
+    admin::record(&mut tx, Some(admin.0.id), "user.set_role", Some(Subject::User(id)),
         json!({ "username": target.username, "from": target.role, "to": role }))
         .await
         .map_err(internal_msg)?;
@@ -257,7 +260,7 @@ pub async fn delete_user(
     keep_an_admin(&target)?;
 
     let released = admin::delete_user(&mut tx, id).await.map_err(internal_msg)?;
-    admin::record(&mut tx, Some(admin.0.id), "user.delete", Some(id),
+    admin::record(&mut tx, Some(admin.0.id), "user.delete", Some(Subject::User(id)),
         json!({ "username": target.username, "released_carriers": released }))
         .await
         .map_err(internal_msg)?;
@@ -337,6 +340,7 @@ pub struct AuditQuery {
     #[serde(default = "default_per_page")]
     per_page: i64,
     user: Option<i64>,
+    carrier: Option<i64>,
 }
 
 pub async fn list_audit(
@@ -346,9 +350,10 @@ pub async fn list_audit(
 ) -> Result<Json<Value>, StatusCode> {
     let page = q.page.max(1);
     let per_page = q.per_page.clamp(1, 100);
+    let subject = q.user.map(Subject::User).or(q.carrier.map(Subject::Carrier));
 
     let (items, total) =
-        admin::list_actions(&state.db_pool, q.user, per_page, (page - 1).saturating_mul(per_page))
+        admin::list_actions(&state.db_pool, subject, per_page, (page - 1).saturating_mul(per_page))
             .await
             .map_err(internal)?;
 
@@ -359,4 +364,204 @@ pub async fn list_audit(
         "total": total,
         "total_pages": (total + per_page - 1) / per_page,
     })))
+}
+
+// --- Carriers ---------------------------------------------------------------
+
+#[derive(Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Filter {
+    #[default]
+    All,
+    Hidden,
+    Unowned,
+}
+
+#[derive(Deserialize)]
+pub struct CarrierListQuery {
+    #[serde(default = "default_page")]
+    page: i64,
+    #[serde(default = "default_per_page")]
+    per_page: i64,
+    q: Option<String>,
+    #[serde(default)]
+    filter: Filter,
+}
+
+/// Every carrier, whatever its visibility, for moderation.
+pub async fn list_carriers(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(q): Query<CarrierListQuery>,
+) -> Result<Json<Value>, StatusCode> {
+    let page = q.page.max(1);
+    let per_page = q.per_page.clamp(1, 100);
+    let search = q.q.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let filter = match q.filter {
+        Filter::All => CarrierFilter::All,
+        Filter::Hidden => CarrierFilter::Hidden,
+        Filter::Unowned => CarrierFilter::Unowned,
+    };
+
+    let (items, total) = admin::list_carriers(
+        &state.db_pool,
+        search,
+        filter,
+        per_page,
+        (page - 1).saturating_mul(per_page),
+    )
+    .await
+    .map_err(internal)?;
+
+    Ok(Json(json!({
+        "items": items,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": (total + per_page - 1) / per_page,
+    })))
+}
+
+pub async fn get_carrier(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, StatusCode> {
+    admin::carrier_detail(&state.db_pool, id)
+        .await
+        .map_err(internal)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+/// Lock the target carrier, or 404.
+async fn carrier_target(conn: &mut PgConnection, id: i64) -> Result<CarrierTarget, ApiError> {
+    admin::lock_carrier(conn, id)
+        .await
+        .map_err(internal_msg)?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "no such carrier"))
+}
+
+/// The audit detail every carrier action carries, plus `extra`. The owner at
+/// the time is recorded so their history includes actions on their carriers.
+fn carrier_entry(c: &CarrierTarget, extra: Value) -> Value {
+    let mut detail = json!({ "callsign": c.callsign, "owner_id": c.owner_id, "owner": c.owner });
+    if let (Some(d), Value::Object(e)) = (detail.as_object_mut(), extra) {
+        d.extend(e);
+    }
+    detail
+}
+
+#[derive(Deserialize)]
+pub struct OwnerBody {
+    /// The new owner's username; null leaves the carrier unowned, so its real
+    /// owner's plugin can claim it again.
+    username: Option<String>,
+}
+
+pub async fn set_carrier_owner(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+    Json(body): Json<OwnerBody>,
+) -> Result<StatusCode, ApiError> {
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let carrier = carrier_target(&mut tx, id).await?;
+    let to = match body.username.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+        Some(name) => Some(
+            admin::find_user(&mut tx, name)
+                .await
+                .map_err(internal_msg)?
+                .ok_or_else(|| err(StatusCode::NOT_FOUND, "no such user"))?,
+        ),
+        None => None,
+    };
+    let to_id = to.as_ref().map(|(id, _)| *id);
+    if to_id == carrier.owner_id {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
+    admin::set_carrier_owner(&mut tx, id, to_id).await.map_err(internal_msg)?;
+    let (action, extra) = match &to {
+        Some((to_id, to_name)) => {
+            ("carrier.reassign", json!({ "to_owner_id": to_id, "to_owner": to_name }))
+        }
+        None => ("carrier.release", json!({})),
+    };
+    admin::record(&mut tx, Some(admin.0.id), action, Some(Subject::Carrier(id)),
+        carrier_entry(&carrier, extra))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct HideBody {
+    reason: Option<String>,
+}
+
+/// Hide a carrier from everyone but its owner and admins, whatever its
+/// visibility. The owner sees the reason.
+pub async fn hide_carrier(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+    Json(body): Json<HideBody>,
+) -> Result<StatusCode, ApiError> {
+    let reason = body.reason.as_deref().map(str::trim).filter(|r| !r.is_empty());
+    if reason.is_some_and(|r| r.chars().count() > 500) {
+        return Err(err(StatusCode::BAD_REQUEST, "reason must be at most 500 characters"));
+    }
+
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let carrier = carrier_target(&mut tx, id).await?;
+    if carrier.hidden {
+        return Err(err(StatusCode::CONFLICT, "already hidden"));
+    }
+    admin::set_carrier_hidden(&mut tx, id, Some(reason)).await.map_err(internal_msg)?;
+    admin::record(&mut tx, Some(admin.0.id), "carrier.hide", Some(Subject::Carrier(id)),
+        carrier_entry(&carrier, json!({ "reason": reason })))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn unhide_carrier(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let carrier = carrier_target(&mut tx, id).await?;
+    if !carrier.hidden {
+        return Err(err(StatusCode::CONFLICT, "not hidden"));
+    }
+    admin::set_carrier_hidden(&mut tx, id, None).await.map_err(internal_msg)?;
+    admin::record(&mut tx, Some(admin.0.id), "carrier.unhide", Some(Subject::Carrier(id)),
+        carrier_entry(&carrier, json!({})))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Delete a carrier with its history and market. The next event about it
+/// creates it afresh (and its owner's CarrierStats claims it), so this is for
+/// clearing bad data, such as an impostor holding a callsign.
+pub async fn delete_carrier(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, ApiError> {
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let carrier = carrier_target(&mut tx, id).await?;
+    let events = admin::delete_carrier(&mut tx, id).await.map_err(internal_msg)?;
+    admin::record(&mut tx, Some(admin.0.id), "carrier.delete", Some(Subject::Carrier(id)),
+        carrier_entry(&carrier, json!({ "events": events })))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(Json(json!({ "events": events })))
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, auth } from '$lib/auth.svelte';
   import { formatTimestamp } from '$lib/format';
-  import type { AdminUserDetail } from '$lib/types/admin';
+  import type { AdminUserDetail, AuditFilter } from '$lib/types/admin';
   import { VISIBILITY_LABEL } from '$lib/visibility';
 
   /**
@@ -13,12 +13,15 @@
     userId,
     onchange,
     onhistory,
+    onopencarrier,
     onclose
   }: {
     userId: number;
     onchange: () => void;
     /** Show the audit log for this account. */
-    onhistory: (user: { id: number; name: string }) => void;
+    onhistory: (filter: AuditFilter) => void;
+    /** Open one of its carriers' moderation dialog instead. */
+    onopencarrier: (id: number) => void;
     onclose: () => void;
   } = $props();
 
@@ -168,7 +171,7 @@
           <p class="option__hint">None.</p>
         {:else}
           <table class="modal__table">
-            <thead><tr><th>Callsign</th><th>Name</th><th>Visibility</th></tr></thead>
+            <thead><tr><th>Callsign</th><th>Name</th><th>Visibility</th><th></th></tr></thead>
             <tbody>
               {#each user.carrier_list as c (c.carrier_id)}
                 <tr>
@@ -177,6 +180,7 @@
                   </td>
                   <td>{c.name ?? '—'}</td>
                   <td>{VISIBILITY_LABEL[c.visibility]}</td>
+                  <td class="actions"><button onclick={() => onopencarrier(c.carrier_id)}>Manage</button></td>
                 </tr>
               {/each}
             </tbody>
@@ -209,7 +213,7 @@
     <div class="modal__foot">
       {#if user}
         {@const u = user}
-        <button onclick={() => onhistory({ id: u.id, name: u.username })}>History</button>
+        <button onclick={() => onhistory({ kind: 'user', id: u.id, name: u.username })}>History</button>
       {/if}
       <button onclick={() => dialog.close()}>Close</button>
     </div>

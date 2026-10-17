@@ -5,29 +5,33 @@
   import { page as route } from '$app/state';
   import { auth, api } from '$lib/auth.svelte';
   import { formatTimestamp } from '$lib/format';
-  import type { AdminUserPage } from '$lib/types/admin';
+  import type { AdminUserPage, AuditFilter } from '$lib/types/admin';
   import AdminUserSettings from '$lib/components/AdminUserSettings.svelte';
   import AdminSettings from '$lib/components/AdminSettings.svelte';
   import AdminAudit from '$lib/components/AdminAudit.svelte';
+  import AdminCarriers from '$lib/components/AdminCarriers.svelte';
+  import AdminCarrierSettings from '$lib/components/AdminCarrierSettings.svelte';
 
   const PER_PAGE = 25;
-  const TABS = { accounts: 'Accounts', settings: 'Settings', audit: 'Audit log' } as const;
+  const TABS = { accounts: 'Accounts', carriers: 'Carriers', settings: 'Settings', audit: 'Audit log' } as const;
   type Tab = keyof typeof TABS;
 
   const initialTab = route.url.searchParams.get('tab');
   let tab = $state<Tab>(initialTab && initialTab in TABS ? (initialTab as Tab) : 'accounts');
-  // The audit log's account filter; set from an account's "History".
-  let auditUser = $state<{ id: number; name: string } | null>(null);
-  // Bumped on every change from the account dialog, so an open log re-reads.
-  let auditVersion = $state(0);
+  // The audit log's filter; set from an account's or carrier's "History".
+  let auditFilter = $state<AuditFilter | null>(null);
+  // Bumped on every change from a dialog, so the open list or log re-reads.
+  let version = $state(0);
 
   let result = $state<AdminUserPage | null>(null);
   let page = $state(1);
   let query = $state('');
   let error = $state('');
   let denied = $state(false);
-  // Account whose dialog is open. `?user=` opens one on arrival.
+  // Account or carrier whose dialog is open (one at a time). `?user=` or
+  // `?carrier=` opens one on arrival.
   let managing = $state<number | null>(Number(route.url.searchParams.get('user')) || null);
+  let managingCarrier = $state<number | null>(Number(route.url.searchParams.get('carrier')) || null);
 
   // Guards against a slow response landing after a newer one.
   let seq = 0;
@@ -63,17 +67,29 @@
     if (next === 'accounts') url.searchParams.delete('tab');
     else url.searchParams.set('tab', next);
     url.searchParams.delete('user');
+    url.searchParams.delete('carrier');
     replaceState(url, {});
   }
 
   function changed() {
-    auditVersion++;
+    version++;
     void load();
   }
 
-  function history(user: { id: number; name: string }) {
-    auditUser = user;
+  function openUser(id: number) {
+    managingCarrier = null;
+    managing = id;
+  }
+
+  function openCarrier(id: number) {
     managing = null;
+    managingCarrier = id;
+  }
+
+  function history(filter: AuditFilter) {
+    auditFilter = filter;
+    managing = null;
+    managingCarrier = null;
     show('audit');
   }
 
@@ -104,8 +120,10 @@
 
     {#if tab === 'settings'}
       <AdminSettings />
+    {:else if tab === 'carriers'}
+      <AdminCarriers {version} onmanage={openCarrier} onopenuser={openUser} />
     {:else if tab === 'audit'}
-      <AdminAudit user={auditUser} version={auditVersion} onfilter={(u) => (auditUser = u)} onopen={(id) => (managing = id)} />
+      <AdminAudit filter={auditFilter} {version} onfilter={(f) => (auditFilter = f)} onopenuser={openUser} />
     {:else}
       <section class="section">
         <div class="history__head">
@@ -150,7 +168,7 @@
                     <td>{u.tokens}</td>
                     <td>{u.last_seen ? formatTimestamp(u.last_seen) : 'never'}</td>
                     <td>{formatTimestamp(u.created_at)}</td>
-                    <td class="actions"><button onclick={() => (managing = u.id)}>Manage</button></td>
+                    <td class="actions"><button onclick={() => openUser(u.id)}>Manage</button></td>
                   </tr>
                 {/each}
               </tbody>
@@ -167,7 +185,22 @@
     {/if}
 
     {#if managing !== null}
-      <AdminUserSettings userId={managing} onchange={changed} onhistory={history} onclose={() => (managing = null)} />
+      <AdminUserSettings
+        userId={managing}
+        onchange={changed}
+        onhistory={history}
+        onopencarrier={openCarrier}
+        onclose={() => (managing = null)}
+      />
+    {/if}
+    {#if managingCarrier !== null}
+      <AdminCarrierSettings
+        carrierId={managingCarrier}
+        onchange={changed}
+        onhistory={history}
+        onopenuser={openUser}
+        onclose={() => (managingCarrier = null)}
+      />
     {/if}
   {/if}
 </div>

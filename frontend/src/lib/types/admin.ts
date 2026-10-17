@@ -54,7 +54,9 @@ export interface AuditEntry {
 	/** Null for the command line, or once the acting admin is deleted. */
 	admin_id: number | null;
 	admin: string | null;
+	target_kind: 'user' | 'carrier' | null;
 	target_id: number | null;
+	/** Username or callsign: the current one, else the one recorded. */
 	target: string | null;
 	detail: Record<string, unknown>;
 }
@@ -65,4 +67,40 @@ export interface AuditPage {
 	per_page: number;
 	total: number;
 	total_pages: number;
+}
+
+/** A row of `GET /api/admin/carriers`: every carrier, whatever its visibility. */
+export interface AdminCarrierRow {
+	carrier_id: number;
+	callsign: string | null;
+	name: string | null;
+	star_system: string | null;
+	visibility: Visibility;
+	updated_at: string | null;
+	owner_id: number | null;
+	owner: string | null;
+	owner_disabled: boolean | null;
+	moderation_hidden_at: string | null;
+	moderation_reason: string | null;
+}
+
+export interface AdminCarrierPage {
+	items: AdminCarrierRow[];
+	page: number;
+	per_page: number;
+	total: number;
+	total_pages: number;
+}
+
+/** `GET /api/admin/carriers/{id}`: the row plus what it stores. */
+export interface AdminCarrierDetail extends AdminCarrierRow {
+	events: number;
+	commodities: number;
+}
+
+/** What the audit log is narrowed to. */
+export interface AuditFilter {
+	kind: 'user' | 'carrier';
+	id: number;
+	name: string;
 }

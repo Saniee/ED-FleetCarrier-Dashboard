@@ -2,23 +2,24 @@
   import { untrack } from 'svelte';
   import { api } from '$lib/auth.svelte';
   import { formatTimestamp } from '$lib/format';
-  import type { AuditEntry, AuditPage } from '$lib/types/admin';
+  import type { AuditEntry, AuditFilter, AuditPage } from '$lib/types/admin';
 
   /**
-   * The audit log, newest first. `user` narrows it to one account; `onfilter`
-   * asks the page to change that (null shows everything). A new `version`
-   * re-reads the current page; `onopen` opens an account.
+   * The audit log, newest first. `filter` narrows it to one account (with
+   * actions on carriers it owned or was given) or one carrier; `onfilter` asks
+   * the page to change that (null shows everything). A new `version` re-reads
+   * the current page; `onopenuser` opens an account.
    */
   let {
-    user,
+    filter,
     version,
     onfilter,
-    onopen
+    onopenuser
   }: {
-    user: { id: number; name: string } | null;
+    filter: AuditFilter | null;
     version: number;
-    onfilter: (user: { id: number; name: string } | null) => void;
-    onopen: (id: number) => void;
+    onfilter: (filter: AuditFilter | null) => void;
+    onopenuser: (id: number) => void;
   } = $props();
 
   const PER_PAGE = 50;
@@ -32,7 +33,7 @@
     const mine = ++seq;
     error = '';
     const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
-    if (user) params.set('user', String(user.id));
+    if (filter) params.set(filter.kind, String(filter.id));
     const res = await api(`/api/admin/audit?${params}`).catch(() => null);
     if (mine !== seq) return;
     if (res?.ok) result = (await res.json()) as AuditPage;
@@ -41,7 +42,7 @@
 
   // Back to the first page whenever the filter changes.
   $effect(() => {
-    void user;
+    void filter;
     untrack(() => {
       page = 1;
       void load();
@@ -89,6 +90,16 @@
         const n = Array.isArray(d.released_carriers) ? d.released_carriers.length : 0;
         return { before: 'Deleted', after: n ? ` (released ${(d.released_carriers as string[]).join(', ')})` : '' };
       }
+      case 'carrier.hide':
+        return { before: 'Hid carrier', after: d.reason ? `: ${d.reason}` : '' };
+      case 'carrier.unhide':
+        return { before: 'Unhid carrier', after: '' };
+      case 'carrier.reassign':
+        return { before: 'Gave carrier', after: ` from ${d.owner ?? 'nobody'} to ${d.to_owner}` };
+      case 'carrier.release':
+        return { before: 'Released carrier', after: d.owner ? ` from ${d.owner}` : '' };
+      case 'carrier.delete':
+        return { before: 'Deleted carrier', after: ` (${d.events} event${d.events === 1 ? '' : 's'})` };
       case 'settings.registration':
         return {
           before: `Set registration to ${REGISTRATION[String(d.to)]}`,
@@ -111,9 +122,9 @@
     {#if result}<span class="status status--online">{result.total} entr{result.total === 1 ? 'y' : 'ies'}</span>{/if}
   </div>
 
-  {#if user}
+  {#if filter}
     <p class="option__hint">
-      Showing actions on <strong>{user.name}</strong> only.
+      Showing actions on <strong>{filter.name}</strong> only{filter.kind === 'user' ? ', and on carriers it owned' : ''}.
       <button onclick={() => onfilter(null)}>Show all</button>
     </p>
   {/if}
@@ -137,13 +148,13 @@
               <td>{formatTimestamp(e.created_at)}</td>
               <td>
                 {#if e.admin_id !== null}
-                  <button class="link" onclick={() => onopen(e.admin_id!)}>{actor(e)}</button>
+                  <button class="link" onclick={() => onopenuser(e.admin_id!)}>{actor(e)}</button>
                 {:else}
                   <span class="muted">{actor(e)}</span>
                 {/if}
               </td>
               <!-- One line: whitespace between the parts would show in the text. -->
-              <td>{text.before}{#if e.target_id !== null}{' '}<button class="link" title="Only this account's entries" onclick={() => onfilter({ id: e.target_id!, name: e.target ?? `#${e.target_id}` })}>{e.target ?? `#${e.target_id}`}</button>{/if}{text.after}</td>
+              <td>{text.before}{#if e.target_id !== null}{' '}<button class="link" title="Only this account's entries" onclick={() => onfilter({ kind: e.target_kind!, id: e.target_id!, name: e.target ?? `#${e.target_id}` })}>{e.target ?? `#${e.target_id}`}</button>{/if}{text.after}</td>
             </tr>
           {/each}
         </tbody>

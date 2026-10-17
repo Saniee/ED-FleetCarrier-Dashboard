@@ -39,7 +39,7 @@ pub async fn admin(pool: &PgPool, args: &[String]) -> Result<(), String> {
                 .await
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| format!("no user named {username:?}"))?;
-            admin::record(&mut tx, None, action, Some(user.id), json!({ "via": "cli" }))
+            admin::record(&mut tx, None, action, Some(admin::Subject::User(user.id)), json!({ "via": "cli" }))
                 .await
                 .map_err(|e| e.to_string())?;
             tx.commit().await.map_err(|e| e.to_string())?;

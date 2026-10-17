@@ -105,7 +105,12 @@
                   <td><a href={`/carrier/${encodeURIComponent(c.callsign ?? '')}`}>{c.callsign}</a></td>
                   <td>{c.name ?? '—'}{#if c.is_squadron || isSquadronHull(c.carrier_type)} <span class="tag">Squadron</span>{/if}</td>
                   <td>{c.star_system ?? '—'}</td>
-                  <td>{c.visibility ? VISIBILITY_LABEL[c.visibility] : '—'}</td>
+                  <td>
+                    {c.visibility ? VISIBILITY_LABEL[c.visibility] : '—'}
+                    {#if c.moderation_hidden_at}
+                      <span class="tag tag--alert" title={c.moderation_reason ?? 'No reason given'}>Hidden by a moderator</span>
+                    {/if}
+                  </td>
                   <td class="actions">
                     <button onclick={() => (managing = c.callsign)}>Manage</button>
                   </td>
