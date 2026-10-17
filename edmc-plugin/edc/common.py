@@ -6,7 +6,7 @@ import os
 
 from config import appname  # type: ignore  # provided by EDMC
 
-PLUGIN_NAME = "ed-commander"
+PLUGIN_NAME = "ed-fleetcarriers-connector"
 __version__ = "1.2.1"
 
 # EDMC logs a plugin under "<appname>.<plugin folder>"; use the same name so our

@@ -1,4 +1,4 @@
-# ED-FleetCarrier-Dashboard
+# ED FleetCarriers
 ## Setup
 ```
 # Clone repo and fill in .env info
