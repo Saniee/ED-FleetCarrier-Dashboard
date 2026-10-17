@@ -15,6 +15,8 @@ _PLUGIN_FOLDER = os.path.basename(os.path.dirname(os.path.dirname(os.path.abspat
 logger = logging.getLogger(f"{appname}.{_PLUGIN_FOLDER}")
 
 # --- EDMC config keys (unique prefix so we never clash with other plugins) ---
+# EDMC stores the settings under these keys: keep them if the plugin is renamed,
+# or existing users lose their URL and token.
 CFG_URL = "edcommander_url"
 CFG_TOKEN = "edcommander_token"
 CFG_ENABLED = "edcommander_enabled"

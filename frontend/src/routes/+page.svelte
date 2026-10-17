@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SITE_NAME } from '$lib/site';
   import { onMount } from 'svelte';
   import type { CarrierPage } from '$lib/types/carrier';
   import { formatTimestamp } from '$lib/format';
@@ -44,7 +45,7 @@
 </script>
 
 <svelte:head>
-  <title>Carriers · ED Commander</title>
+  <title>Carriers · {SITE_NAME}</title>
 </svelte:head>
 
 <div class="carrier-page">

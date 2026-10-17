@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SITE_NAME } from '$lib/site';
   import { onMount, untrack } from 'svelte';
   import type { PageData } from './$types';
   import { createCarrierFeed } from '$lib/carrier-feed.svelte';
@@ -77,7 +78,7 @@
   );
 </script>
 <svelte:head>
-  <title>{feed.carrier?.callsign ?? data.slug} · ED Commander</title>
+  <title>{feed.carrier?.callsign ?? data.slug} · {SITE_NAME}</title>
 </svelte:head>
 
 {#if data.notFound}

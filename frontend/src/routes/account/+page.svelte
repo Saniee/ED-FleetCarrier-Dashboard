@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SITE_NAME } from '$lib/site';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
@@ -70,7 +71,7 @@
 </script>
 
 <svelte:head>
-  <title>Account · ED Commander</title>
+  <title>Account · {SITE_NAME}</title>
 </svelte:head>
 
 <div class="carrier-page">

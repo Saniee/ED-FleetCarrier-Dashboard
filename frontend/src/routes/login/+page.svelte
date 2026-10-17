@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SITE_NAME } from '$lib/site';
   import { goto } from '$app/navigation';
   import { auth } from '$lib/auth.svelte';
 
@@ -16,7 +17,7 @@
 </script>
 
 <svelte:head>
-  <title>Login · ED Commander</title>
+  <title>Login · {SITE_NAME}</title>
 </svelte:head>
 
 <div class="carrier-page">
