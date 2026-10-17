@@ -30,7 +30,10 @@ pub async fn post(
     // row has to exist before the history row that references it is written.
     let carrier_id = carriers::apply(&state.db_pool, &payload)
         .await
-        .map_err(internal_msg)?;
+        .map_err(|err| match callsign_taken(&err) {
+            true => (StatusCode::CONFLICT, "callsign belongs to another carrier".to_string()),
+            false => internal_msg(err),
+        })?;
 
     let event_id = log_event::insert(&state.db_pool, &payload, carrier_id)
         .await
@@ -47,8 +50,15 @@ pub async fn post(
             .map_err(internal_msg)?;
     }
 
+    // Who to hold a visitor event against: the reporting user, or `None` for
+    // owner-only events and the legacy token, which are trusted as they are.
+    let reporter = match (ingest, is_visitor_event(&payload)) {
+        (Ingest::User(user_id), true) => Some(user_id),
+        _ => None,
+    };
+
     if let (Some(id), Some(carrier_type)) = (carrier_id, payload.carrier_type()) {
-        carriers::set_carrier_type(&state.db_pool, id, carrier_type)
+        carriers::set_carrier_type(&state.db_pool, id, carrier_type, reporter)
             .await
             .map_err(internal_msg)?;
     }
@@ -56,10 +66,6 @@ pub async fn post(
     // Location events from anyone but the owner are flagged so clients can mark
     // the location as unconfirmed; the owner's own event clears the flag.
     if let (Some(id), true) = (carrier_id, is_visitor_event(&payload)) {
-        let reporter = match ingest {
-            Ingest::User(user_id) => Some(user_id),
-            Ingest::Legacy => None,
-        };
         carriers::set_location_unverified(&state.db_pool, id, reporter)
             .await
             .map_err(internal_msg)?;
@@ -88,6 +94,14 @@ pub async fn post(
         StatusCode::ACCEPTED,
         Json(json!({ "event_id": event_id, "carrier_id": carrier_id })),
     ))
+}
+
+/// Another carrier already holds this event's callsign (case-insensitively). The
+/// journal can't prove which carrier is genuine, so this is reported, not resolved.
+fn callsign_taken(err: &sqlx::Error) -> bool {
+    err.as_database_error()
+        .and_then(|e| e.constraint())
+        .is_some_and(|c| c == "carriers_callsign_upper_idx")
 }
 
 /// Events a commander generates merely by being docked at a carrier, so they say

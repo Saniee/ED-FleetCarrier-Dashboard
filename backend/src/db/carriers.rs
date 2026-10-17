@@ -36,16 +36,25 @@ pub async fn apply(pool: &PgPool, event: &CarrierEvent) -> sqlx::Result<Option<i
     }
 }
 
+/// Store the journal's `CarrierType`. `reporter` is the visitor behind the event,
+/// if any: a visitor may set it on an unowned carrier but not change an owned
+/// one, since it drives the owner's fuel estimate.
 pub async fn set_carrier_type(
     pool: &PgPool,
     carrier_id: i64,
     carrier_type: &str,
+    reporter: Option<i64>,
 ) -> sqlx::Result<()> {
-    sqlx::query("UPDATE carriers SET carrier_type = $2 WHERE carrier_id = $1")
-        .bind(carrier_id)
-        .bind(carrier_type)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE carriers SET carrier_type = $2
+         WHERE carrier_id = $1
+           AND ($3::bigint IS NULL OR owner_id IS NULL OR owner_id = $3)",
+    )
+    .bind(carrier_id)
+    .bind(carrier_type)
+    .bind(reporter)
+    .execute(pool)
+    .await?;
 
     Ok(())
 }

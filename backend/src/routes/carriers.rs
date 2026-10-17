@@ -100,27 +100,6 @@ pub async fn get(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
-/// Claim an unowned carrier. Idempotent for its current owner.
-pub async fn claim(
-    Path(callsign): Path<String>,
-    State(state): State<AppState>,
-    AuthUser(user): AuthUser,
-) -> Result<StatusCode, StatusCode> {
-    let (carrier_id, owner) = resolve(&state, &callsign).await?;
-    match owner {
-        Some(id) if id == user.id => Ok(StatusCode::NO_CONTENT),
-        Some(_) => Err(StatusCode::CONFLICT),
-        None => match carriers::claim(&state.db_pool, carrier_id, user.id)
-            .await
-            .map_err(internal)?
-        {
-            true => Ok(StatusCode::NO_CONTENT),
-            // Lost a race with another claim.
-            false => Err(StatusCode::CONFLICT),
-        },
-    }
-}
-
 pub async fn release(
     Path(callsign): Path<String>,
     State(state): State<AppState>,

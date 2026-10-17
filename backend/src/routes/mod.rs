@@ -6,18 +6,60 @@ mod market;
 mod recent_events;
 mod healthz;
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
-use axum::{Router, response::Html, routing::{delete, get, post}};
+use axum::{
+    Router,
+    extract::ConnectInfo,
+    http::Request,
+    response::Html,
+    routing::{delete, get, post},
+};
 use tower_governor::{
-    GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor,
+    GovernorError, GovernorLayer, governor::GovernorConfigBuilder, key_extractor::KeyExtractor,
 };
 
 use crate::app_state::AppState;
 
+/// The client IP as seen by the reverse proxy in front of the backend.
+///
+/// Takes the *last* `X-Forwarded-For` entry: the one the nearest proxy added.
+/// Earlier entries come from the client and can be anything, and a proxy that
+/// appends (nginx's `proxy_add_x_forwarded_for`) leaves them in place, so the
+/// first entry would let a client pick its own rate-limit bucket. Falls back to
+/// `X-Real-IP`, then the socket peer. Exposed without a proxy, both headers can
+/// be forged, which is why compose binds the backend to loopback.
+#[derive(Clone, Copy)]
+struct ProxyIpKeyExtractor;
+
+impl KeyExtractor for ProxyIpKeyExtractor {
+    type Key = IpAddr;
+
+    fn extract<T>(&self, req: &Request<T>) -> Result<IpAddr, GovernorError> {
+        let headers = req.headers();
+        let header_ip = |name: &str, last: bool| {
+            let value = headers.get(name)?.to_str().ok()?;
+            let mut entries = value.split(',').map(str::trim);
+            let entry = if last { entries.next_back() } else { entries.next() }?;
+            entry.parse::<IpAddr>().ok()
+        };
+
+        header_ip("x-forwarded-for", true)
+            .or_else(|| header_ip("x-real-ip", false))
+            .or_else(|| {
+                req.extensions()
+                    .get::<ConnectInfo<SocketAddr>>()
+                    .map(|ConnectInfo(addr)| addr.ip())
+            })
+            .ok_or(GovernorError::UnableToExtractKey)
+    }
+}
+
 /// Limit `router` per client IP: `burst` requests, then one more every `every`.
-/// The IP comes from `X-Forwarded-For` / `X-Real-IP`, so keep the backend behind
-/// the proxy; exposed directly, those headers can be forged.
 fn limited<S: Clone + Send + Sync + 'static>(
     router: Router<S>,
     every: Duration,
@@ -25,7 +67,7 @@ fn limited<S: Clone + Send + Sync + 'static>(
 ) -> Router<S> {
     let config = Arc::new(
         GovernorConfigBuilder::default()
-            .key_extractor(SmartIpKeyExtractor)
+            .key_extractor(ProxyIpKeyExtractor)
             .period(every)
             .burst_size(burst)
             .finish()
@@ -64,10 +106,10 @@ pub fn router(app: AppState) -> Router {
             "/api/carriers/{callsign}",
             get(carriers::get).patch(carriers::update_settings),
         )
-        .route(
-            "/api/carriers/{callsign}/claim",
-            post(carriers::claim).delete(carriers::release),
-        )
+        // Claiming happens only through ingest (the owner's CarrierStats). A
+        // claim-by-callsign endpoint let any account take over any unowned
+        // carrier, so only releasing is exposed here.
+        .route("/api/carriers/{callsign}/claim", delete(carriers::release))
         .route("/api/carriers/{callsign}/events", get(recent_events::get_events_by_callsign))
         .route("/api/carriers/{callsign}/market", get(market::get_by_callsign))
         .route("/api/carriers/{callsign}/stream", get(carrier_stream::stream_by_callsign))
@@ -128,5 +170,19 @@ mod tests {
         assert_eq!(status(&app, "1.1.1.1").await, StatusCode::OK);
         assert_eq!(status(&app, "1.1.1.1").await, StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(status(&app, "2.2.2.2").await, StatusCode::OK);
+    }
+
+    /// An appending proxy keeps whatever the client sent in front of the real
+    /// address, so only the last entry may pick the bucket.
+    #[tokio::test]
+    async fn spoofed_forwarded_for_entries_are_ignored() {
+        let app: Router = limited(
+            Router::new().route("/", get(|| async { "ok" })),
+            Duration::from_secs(3600),
+            1,
+        );
+
+        assert_eq!(status(&app, "6.6.6.1, 1.1.1.1").await, StatusCode::OK);
+        assert_eq!(status(&app, "6.6.6.2, 1.1.1.1").await, StatusCode::TOO_MANY_REQUESTS);
     }
 }
