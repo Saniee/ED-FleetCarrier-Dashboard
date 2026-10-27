@@ -91,6 +91,8 @@ Merged from [release/multiple-tenants](https://github.com/Saniee/ED-FleetCarrier
 - [x] Admin dashboard: accounts, carrier moderation, registration switch, audit log, traffic
 
 ## Next
+These ship together as the Carrier Operations update; status, decisions and the QA checklist are in [docs/carrier-operations-update.md](docs/carrier-operations-update.md).
+
 - [ ] Discord webhooks per carrier: jumps, market orders, low tritium (draft on `feature/discord-webhooks`)
 - [ ] Hauling and colonisation operations: commodity targets, live progress, per-commander contributions (draft on `feature/hauling-ops`)
 - [ ] Owner finances and logistics: balance runway against upkeep, income over time, tritium for a planned route, low balance alerts (draft on `feature/owner-finances`)
