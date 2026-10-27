@@ -84,6 +84,8 @@ export interface Carrier {
 	reserve_balance: number | null;
 	available_balance: number | null;
 	reserve_percent: number | null;
+	/** Owner-entered; the journal never reports upkeep. */
+	weekly_upkeep: number | null;
 
 	// Per-service tax rates
 	tax_rate_shipyard: number | null;

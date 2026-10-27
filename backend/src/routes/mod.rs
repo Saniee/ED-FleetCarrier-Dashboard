@@ -5,6 +5,7 @@ mod auth;
 mod carriers;
 mod carrier_event;
 mod carrier_stream;
+mod finances;
 mod market;
 mod operations;
 mod plugin;
@@ -14,6 +15,8 @@ mod webhooks;
 mod webhooks_tests;
 #[cfg(test)]
 mod operations_tests;
+#[cfg(test)]
+mod finances_tests;
 mod healthz;
 
 use std::{
@@ -144,6 +147,8 @@ pub fn router(app: AppState) -> Router {
             "/api/carriers/{callsign}/webhook",
             get(webhooks::get).put(webhooks::put).delete(webhooks::delete),
         )
+        .route("/api/carriers/{callsign}/finances", get(finances::history))
+        .route("/api/systems", get(finances::system))
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/plugin", get(plugin::info))
         .route("/api/plugin/download", get(plugin::download))

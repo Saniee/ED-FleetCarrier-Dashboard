@@ -91,9 +91,10 @@ Merged from [release/multiple-tenants](https://github.com/Saniee/ED-FleetCarrier
 - [x] Admin dashboard: accounts, carrier moderation, registration switch, audit log, traffic
 
 ## Next
-- [ ] Discord webhooks per carrier: jumps, market orders, low tritium (draft on `feature/discord-webhooks`; balance alerts come with finances)
+- [ ] Discord webhooks per carrier: jumps, market orders, low tritium (draft on `feature/discord-webhooks`)
 - [ ] Hauling and colonisation operations: commodity targets, live progress, per-commander contributions (draft on `feature/hauling-ops`)
-- [ ] Owner finances and logistics: balance runway against upkeep, income over time, tritium for a planned route
+- [ ] Owner finances and logistics: balance runway against upkeep, income over time, tritium for a planned route, low balance alerts (draft on `feature/owner-finances`)
+    - [ ] Upkeep from a services table: toggle each service as installed or not, and active or suspended
 - [ ] Crew roles: share an owner-only carrier with other accounts (view, or manage orders)
 - [ ] Public discovery: find carriers by system, service or commodity
 - [ ] Easier plugin setup: pair the plugin with an account without copying a token

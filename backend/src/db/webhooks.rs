@@ -9,6 +9,7 @@ pub struct Webhook {
     pub url: String,
     pub events: Vec<String>,
     pub low_fuel_threshold: i32,
+    pub low_balance_weeks: i32,
     pub enabled: bool,
     pub last_sent_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
@@ -21,6 +22,7 @@ pub struct Active {
     pub url: String,
     pub events: Vec<String>,
     pub low_fuel_threshold: i32,
+    pub low_balance_weeks: i32,
 }
 
 impl Active {
@@ -31,7 +33,7 @@ impl Active {
 
 pub async fn get(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<Webhook>> {
     sqlx::query_as(
-        "SELECT url, events, low_fuel_threshold, enabled, last_sent_at, last_error, last_error_at
+        "SELECT url, events, low_fuel_threshold, low_balance_weeks, enabled, last_sent_at, last_error, last_error_at
          FROM carrier_webhooks WHERE carrier_id = $1",
     )
     .bind(carrier_id)
@@ -43,7 +45,7 @@ pub async fn get(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<Webhook>
 /// by the carrier's current owner, and that owner's account isn't disabled.
 pub async fn active(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<Active>> {
     sqlx::query_as(
-        "SELECT w.url, w.events, w.low_fuel_threshold
+        "SELECT w.url, w.events, w.low_fuel_threshold, w.low_balance_weeks
          FROM carrier_webhooks w
          JOIN carriers c ON c.carrier_id = w.carrier_id AND c.owner_id = w.owner_id
          JOIN users u ON u.id = w.owner_id AND u.disabled_at IS NULL
@@ -63,17 +65,20 @@ pub async fn save(
     url: Option<&str>,
     events: &[String],
     low_fuel_threshold: i32,
+    low_balance_weeks: i32,
 ) -> sqlx::Result<bool> {
     let done = match url {
         Some(url) => {
             sqlx::query(
-                "INSERT INTO carrier_webhooks (carrier_id, owner_id, url, events, low_fuel_threshold)
-                 VALUES ($1, $2, $3, $4, $5)
+                "INSERT INTO carrier_webhooks
+                     (carrier_id, owner_id, url, events, low_fuel_threshold, low_balance_weeks)
+                 VALUES ($1, $2, $3, $4, $5, $6)
                  ON CONFLICT (carrier_id) DO UPDATE SET
                      owner_id = EXCLUDED.owner_id,
                      url = EXCLUDED.url,
                      events = EXCLUDED.events,
                      low_fuel_threshold = EXCLUDED.low_fuel_threshold,
+                     low_balance_weeks = EXCLUDED.low_balance_weeks,
                      enabled = true,
                      last_error = NULL,
                      last_error_at = NULL,
@@ -84,6 +89,7 @@ pub async fn save(
             .bind(url)
             .bind(events)
             .bind(low_fuel_threshold)
+            .bind(low_balance_weeks)
             .execute(pool)
             .await?
         }
@@ -93,6 +99,7 @@ pub async fn save(
                      owner_id = $2,
                      events = $3,
                      low_fuel_threshold = $4,
+                     low_balance_weeks = $5,
                      enabled = true,
                      last_error = NULL,
                      last_error_at = NULL,
@@ -103,6 +110,7 @@ pub async fn save(
             .bind(owner_id)
             .bind(events)
             .bind(low_fuel_threshold)
+            .bind(low_balance_weeks)
             .execute(pool)
             .await?
         }

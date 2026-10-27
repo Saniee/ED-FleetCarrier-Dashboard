@@ -11,6 +11,7 @@ mod cli;
 mod discord;
 mod edsm;
 mod error;
+mod finances;
 mod hauling;
 mod notify;
 

@@ -1,10 +1,11 @@
-//! EDSM lookups, used only for a body's name: `CarrierLocation` carries just a
-//! `BodyID`, which EDSM keys bodies by (Spansh only has 64-bit ids). A call
-//! returns a whole system, so callers cache it in `db::body_names`.
+//! EDSM lookups. A body's name: `CarrierLocation` carries just a `BodyID`,
+//! which EDSM keys bodies by (Spansh only has 64-bit ids); a call returns a
+//! whole system, so callers cache it in `db::body_names`. And a system's
+//! coordinates, for the route tritium estimate.
 
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// EDSM has no per-body endpoint, so the system comes back whole and the caller
 /// picks the body it wants.
@@ -55,4 +56,39 @@ pub async fn fetch_bodies(
         .await?;
 
     Ok(response.bodies.unwrap_or_default())
+}
+
+const SYSTEM_URL: &str = "https://www.edsm.net/api-v1/system";
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct Coords {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct SystemCoords {
+    name: String,
+    coords: Option<Coords>,
+}
+
+/// A system's name as EDSM spells it, and where it is. `None` when EDSM doesn't
+/// know the system (it answers `[]`) or has no coordinates for it.
+pub async fn fetch_coords(
+    client: &reqwest::Client,
+    name: &str,
+) -> Result<Option<(String, Coords)>, reqwest::Error> {
+    let body: serde_json::Value = client
+        .get(SYSTEM_URL)
+        .query(&[("systemName", name), ("showCoordinates", "1")])
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    Ok(serde_json::from_value::<SystemCoords>(body)
+        .ok()
+        .and_then(|s| Some((s.name, s.coords?))))
 }

@@ -9,6 +9,7 @@ pub mod settings;
 pub mod stats;
 pub mod webhooks;
 pub mod operations;
+pub mod finances;
 
 use sqlx::PgPool;
 

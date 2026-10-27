@@ -139,6 +139,15 @@ pub fn message(notice: &Notice, carrier: &Carrier) -> Value {
             format!("{level} t of tritium left (alert below {threshold} t)."),
             RED,
         ),
+        Notice::LowBalance { balance, weeks, threshold } => (
+            "Low carrier balance",
+            format!(
+                "{} left: {weeks} week{} of upkeep (alert below {threshold}).",
+                credits(*balance),
+                if *weeks == 1 { "" } else { "s" }
+            ),
+            RED,
+        ),
         Notice::OperationComplete { name } => ("Operation complete", format!("**{name}** has everything it needs."), GREEN),
     };
 

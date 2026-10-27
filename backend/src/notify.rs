@@ -11,7 +11,8 @@ use serde_json::Value;
 use crate::journal_definitions::{CarrierEvent, Commodity, commodity_key};
 
 /// The notice kinds an owner can switch on, as stored in `carrier_webhooks.events`.
-pub const EVENTS: [&str; 6] = ["jump", "arrival", "trade_order", "order_filled", "low_fuel", "operation"];
+pub const EVENTS: [&str; 7] =
+    ["jump", "arrival", "trade_order", "order_filled", "low_fuel", "low_balance", "operation"];
 
 /// Events older than this are replays: they may still change the carrier, but
 /// announcing them would be news from the past.
@@ -32,6 +33,8 @@ pub enum Notice {
     OrderCancelled { commodity: String },
     OrderFilled { commodity: String, side: Side },
     LowFuel { level: i64, threshold: i64 },
+    /// `weeks` of upkeep left, below the owner's `threshold` in weeks.
+    LowBalance { balance: i64, weeks: i64, threshold: i64 },
     OperationComplete { name: String },
 }
 
@@ -44,6 +47,7 @@ impl Notice {
             Notice::OrderPosted { .. } | Notice::OrderCancelled { .. } => "trade_order",
             Notice::OrderFilled { .. } => "order_filled",
             Notice::LowFuel { .. } => "low_fuel",
+            Notice::LowBalance { .. } => "low_balance",
             Notice::OperationComplete { .. } => "operation",
         }
     }
@@ -64,9 +68,18 @@ fn number(row: &Value, key: &str) -> Option<i64> {
     row.get(key).and_then(Value::as_i64)
 }
 
+/// The owner's alert thresholds; 0 switches one off.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Alerts {
+    /// Tritium in tonnes.
+    pub low_fuel: i64,
+    /// Weeks of upkeep, by the carrier's `weekly_upkeep`.
+    pub low_balance_weeks: i64,
+}
+
 /// Notices for one carrier event, from the `carriers` row before and after it
-/// was applied. `low_fuel` is the owner's threshold in tonnes; 0 is off.
-pub fn carrier_notices(event: &CarrierEvent, before: &Value, after: &Value, low_fuel: i64) -> Vec<Notice> {
+/// was applied.
+pub fn carrier_notices(event: &CarrierEvent, before: &Value, after: &Value, alerts: Alerts) -> Vec<Notice> {
     let mut out = Vec::new();
 
     match event {
@@ -119,12 +132,29 @@ pub fn carrier_notices(event: &CarrierEvent, before: &Value, after: &Value, low_
         _ => {}
     }
 
+    let low_fuel = alerts.low_fuel;
     if low_fuel > 0
         && let (Some(was), Some(now)) = (number(before, "fuel_level"), number(after, "fuel_level"))
         && was >= low_fuel
         && now < low_fuel
     {
         out.push(Notice::LowFuel { level: now, threshold: low_fuel });
+    }
+
+    // Upkeep isn't in the journal, so this only knows the owner's figure. Read
+    // from `after`: a changed figure applies from the next balance report.
+    let weeks = alerts.low_balance_weeks;
+    if weeks > 0
+        && let Some(upkeep) = number(after, "weekly_upkeep").filter(|u| *u > 0)
+        && let (Some(was), Some(now)) = (number(before, "carrier_balance"), number(after, "carrier_balance"))
+        && was >= upkeep * weeks
+        && now < upkeep * weeks
+    {
+        out.push(Notice::LowBalance {
+            balance: now,
+            weeks: crate::finances::runway_weeks(now, Some(upkeep)).unwrap_or(0),
+            threshold: weeks,
+        });
     }
 
     out
@@ -195,9 +225,9 @@ mod tests {
         let req = jump_request("Sol", "2026-10-27T12:15:00Z");
         let after = json!({ "jump_destination_system": "Sol", "jump_departure_time": "2026-10-27T12:15:00Z" });
 
-        let first = carrier_notices(&req, &json!({}), &after, 0);
+        let first = carrier_notices(&req, &json!({}), &after, Alerts::default());
         assert!(matches!(&first[..], [Notice::JumpScheduled { system, .. }] if system == "Sol"));
-        assert!(carrier_notices(&req, &after, &after, 0).is_empty());
+        assert!(carrier_notices(&req, &after, &after, Alerts::default()).is_empty());
     }
 
     #[test]
@@ -206,10 +236,10 @@ mod tests {
         let pending = json!({ "jump_destination_system": "Sol" });
 
         assert_eq!(
-            carrier_notices(&cancel, &pending, &json!({}), 0),
+            carrier_notices(&cancel, &pending, &json!({}), Alerts::default()),
             vec![Notice::JumpCancelled { system: "Sol".into() }]
         );
-        assert!(carrier_notices(&cancel, &json!({}), &json!({}), 0).is_empty());
+        assert!(carrier_notices(&cancel, &json!({}), &json!({}), Alerts::default()).is_empty());
     }
 
     #[test]
@@ -221,12 +251,12 @@ mod tests {
         let sol = json!({ "star_system": "Sol", "body": "Earth" });
 
         assert_eq!(
-            carrier_notices(&loc, &json!({ "star_system": "Alpha Centauri" }), &sol, 0),
+            carrier_notices(&loc, &json!({ "star_system": "Alpha Centauri" }), &sol, Alerts::default()),
             vec![Notice::Arrived { system: "Sol".into(), body: Some("Earth".into()) }]
         );
-        assert!(carrier_notices(&loc, &sol, &sol, 0).is_empty());
+        assert!(carrier_notices(&loc, &sol, &sol, Alerts::default()).is_empty());
         // First sighting.
-        assert!(carrier_notices(&loc, &json!({ "star_system": null }), &sol, 0).is_empty());
+        assert!(carrier_notices(&loc, &json!({ "star_system": null }), &sol, Alerts::default()).is_empty());
     }
 
     #[test]
@@ -239,20 +269,20 @@ mod tests {
         let with = json!({ "trade_orders": { "steel": { "PurchaseOrder": 500, "Price": 4000 } } });
 
         assert_eq!(
-            carrier_notices(&buy, &json!({ "trade_orders": {} }), &with, 0),
+            carrier_notices(&buy, &json!({ "trade_orders": {} }), &with, Alerts::default()),
             vec![Notice::OrderPosted { commodity: "Steel".into(), side: Side::Buy, quantity: 500, price: Some(4000) }]
         );
-        assert!(carrier_notices(&buy, &with, &with, 0).is_empty());
+        assert!(carrier_notices(&buy, &with, &with, Alerts::default()).is_empty());
 
         let cancel = event(json!({
             "timestamp": "2026-10-27T12:00:00Z", "event": "CarrierTradeOrder", "CarrierID": 1,
             "BlackMarket": false, "Commodity": "steel", "CancelTrade": true
         }));
         assert_eq!(
-            carrier_notices(&cancel, &with, &json!({ "trade_orders": {} }), 0),
+            carrier_notices(&cancel, &with, &json!({ "trade_orders": {} }), Alerts::default()),
             vec![Notice::OrderCancelled { commodity: "steel".into() }]
         );
-        assert!(carrier_notices(&cancel, &json!({ "trade_orders": {} }), &json!({}), 0).is_empty());
+        assert!(carrier_notices(&cancel, &json!({ "trade_orders": {} }), &json!({}), Alerts::default()).is_empty());
     }
 
     #[test]
@@ -262,13 +292,39 @@ mod tests {
             "Amount": 1, "Total": 150
         }));
         let low = |was: i64, now: i64, t: i64| {
-            carrier_notices(&deposit, &json!({ "fuel_level": was }), &json!({ "fuel_level": now }), t)
+            carrier_notices(&deposit, &json!({ "fuel_level": was }), &json!({ "fuel_level": now }), Alerts { low_fuel: t, ..Alerts::default() })
         };
 
         assert_eq!(low(250, 150, 200), vec![Notice::LowFuel { level: 150, threshold: 200 }]);
         assert!(low(180, 150, 200).is_empty(), "already below");
         assert!(low(250, 210, 200).is_empty(), "still above");
         assert!(low(250, 150, 0).is_empty(), "switched off");
+    }
+
+    #[test]
+    fn low_balance_fires_below_the_weeks_of_upkeep() {
+        let finance = event(json!({
+            "timestamp": "2026-10-27T12:00:00Z", "event": "CarrierFinance", "CarrierID": 1,
+            "CarrierBalance": 1, "ReserveBalance": 0, "AvailableBalance": 1, "ReservePercent": 0
+        }));
+        let alerts = Alerts { low_balance_weeks: 4, ..Alerts::default() };
+        let low = |was: i64, now: i64, upkeep: Option<i64>, alerts: Alerts| {
+            carrier_notices(
+                &finance,
+                &json!({ "carrier_balance": was, "weekly_upkeep": upkeep }),
+                &json!({ "carrier_balance": now, "weekly_upkeep": upkeep }),
+                alerts,
+            )
+        };
+
+        assert_eq!(
+            low(50_000_000, 35_000_000, Some(10_000_000), alerts),
+            vec![Notice::LowBalance { balance: 35_000_000, weeks: 3, threshold: 4 }]
+        );
+        assert!(low(39_000_000, 35_000_000, Some(10_000_000), alerts).is_empty(), "already below");
+        assert!(low(50_000_000, 45_000_000, Some(10_000_000), alerts).is_empty(), "still above");
+        assert!(low(50_000_000, 35_000_000, None, alerts).is_empty(), "no upkeep figure");
+        assert!(low(50_000_000, 35_000_000, Some(10_000_000), Alerts::default()).is_empty(), "switched off");
     }
 
     fn commodity(id: i64, stock: i64, demand: i64) -> Commodity {

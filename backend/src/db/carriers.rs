@@ -852,25 +852,28 @@ pub async fn release(pool: &PgPool, carrier_id: i64, user_id: i64) -> sqlx::Resu
 }
 
 /// Update the owner's settings; `None` leaves a setting as it is. `visibility`
-/// is `public`, `private` or `owner_only`. `false` when `user_id` does not own
-/// the carrier.
+/// is `public`, `private` or `owner_only`; `weekly_upkeep` 0 clears it. `false`
+/// when `user_id` does not own the carrier.
 pub async fn set_settings(
     pool: &PgPool,
     carrier_id: i64,
     user_id: i64,
     visibility: Option<&str>,
     is_squadron: Option<bool>,
+    weekly_upkeep: Option<i64>,
 ) -> sqlx::Result<bool> {
     let done = sqlx::query(
         "UPDATE carriers
          SET visibility = COALESCE($3, visibility),
-             is_squadron = COALESCE($4, is_squadron)
+             is_squadron = COALESCE($4, is_squadron),
+             weekly_upkeep = CASE WHEN $5::bigint IS NULL THEN weekly_upkeep ELSE NULLIF($5, 0) END
          WHERE carrier_id = $1 AND owner_id = $2",
     )
     .bind(carrier_id)
     .bind(user_id)
     .bind(visibility)
     .bind(is_squadron)
+    .bind(weekly_upkeep)
     .execute(pool)
     .await?;
     Ok(done.rows_affected() > 0)

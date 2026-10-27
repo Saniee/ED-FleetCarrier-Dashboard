@@ -98,6 +98,9 @@
       </h1>
       <div>
         {#if owner}
+          <button onclick={() => goto(`/carrier/${encodeURIComponent(feed.carrier?.callsign ?? '')}/finances`)}>
+            Finances
+          </button>
           <button onclick={() => goto(`/account?manage=${encodeURIComponent(feed.carrier?.callsign ?? '')}`)}>
             Manage
           </button>

@@ -8,13 +8,21 @@
    */
   let { callsign }: { callsign: string } = $props();
 
-  type WebhookEvent = 'jump' | 'arrival' | 'trade_order' | 'order_filled' | 'low_fuel' | 'operation';
+  type WebhookEvent =
+    | 'jump'
+    | 'arrival'
+    | 'trade_order'
+    | 'order_filled'
+    | 'low_fuel'
+    | 'low_balance'
+    | 'operation';
 
   interface Webhook {
     configured: boolean;
     url?: string;
     events: WebhookEvent[];
     low_fuel_threshold: number;
+    low_balance_weeks: number;
     enabled?: boolean;
     last_sent_at?: string | null;
     last_error?: string | null;
@@ -26,6 +34,7 @@
     { key: 'trade_order', label: 'Trade order posted or cancelled' },
     { key: 'order_filled', label: 'Trade order filled' },
     { key: 'low_fuel', label: 'Tritium running low' },
+    { key: 'low_balance', label: 'Balance running low' },
     { key: 'operation', label: 'Hauling operation complete' }
   ];
 
@@ -35,6 +44,7 @@
   let url = $state('');
   let events = $state<WebhookEvent[]>([]);
   let threshold = $state(200);
+  let balanceWeeks = $state(4);
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
@@ -48,6 +58,7 @@
     hook = await res.json();
     events = [...hook!.events];
     threshold = hook!.low_fuel_threshold;
+    balanceWeeks = hook!.low_balance_weeks;
     url = '';
   }
 
@@ -77,7 +88,12 @@
   }
 
   const save = () =>
-    run('PUT', '', { url: url.trim() || undefined, events, low_fuel_threshold: threshold }, 'Saved.');
+    run('PUT', '', {
+      url: url.trim() || undefined,
+      events,
+      low_fuel_threshold: threshold,
+      low_balance_weeks: balanceWeeks
+    }, 'Saved.');
   const test = () => run('POST', '/test', undefined, 'Test message sent.');
   const remove = () => run('DELETE', '', undefined, 'Webhook removed.');
 </script>
@@ -85,7 +101,7 @@
 <fieldset class="modal__group" disabled={busy || !hook}>
   <legend>Discord</legend>
   <p class="option__hint">
-    Post this carrier's jumps, trade orders and low tritium to a Discord channel. In Discord:
+    Post this carrier's jumps, trade orders, low tritium and low balance to a Discord channel. In Discord:
     channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL.
   </p>
 
@@ -112,6 +128,16 @@
       <label class="option">
         <input type="number" min="0" max="1000" bind:value={threshold} />
         <span class="option__hint">Alert below this many tonnes of tritium.</span>
+      </label>
+    {/if}
+
+    {#if events.includes('low_balance')}
+      <label class="option">
+        <input type="number" min="0" max="52" bind:value={balanceWeeks} />
+        <span class="option__hint">
+          Alert below this many weeks of upkeep. Needs the weekly upkeep, set on the carrier's
+          Finances page.
+        </span>
       </label>
     {/if}
 

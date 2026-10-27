@@ -167,7 +167,11 @@ pub struct Settings {
     visibility: Option<Visibility>,
     /// Owner's designation of this carrier as their squadron's carrier.
     is_squadron: Option<bool>,
+    /// Weekly upkeep in credits, from the in-game finance screen; 0 clears it.
+    weekly_upkeep: Option<i64>,
 }
+
+const MAX_UPKEEP: i64 = 1_000_000_000;
 
 pub async fn update_settings(
     Path(callsign): Path<String>,
@@ -176,12 +180,16 @@ pub async fn update_settings(
     Json(body): Json<Settings>,
 ) -> Result<StatusCode, StatusCode> {
     let (carrier_id, _) = resolve(&state, &callsign).await?;
+    if body.weekly_upkeep.is_some_and(|u| !(0..=MAX_UPKEEP).contains(&u)) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     match carriers::set_settings(
         &state.db_pool,
         carrier_id,
         user.id,
         body.visibility.map(Visibility::as_str),
         body.is_squadron,
+        body.weekly_upkeep,
     )
     .await
     .map_err(internal)?

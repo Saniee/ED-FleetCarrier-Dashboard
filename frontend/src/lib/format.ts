@@ -43,6 +43,13 @@ export function formatTimestamp(
 	}).format(date);
 }
 
+/** A day without the time (`29.10.2026`), in the viewer's timezone. */
+export function formatDay(value: string | number): string {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return EMPTY;
+	return new Intl.DateTimeFormat(LOCALE, { year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+}
+
 export function formatNumber(
 	value: number | null | undefined,
 	options?: Intl.NumberFormatOptions,

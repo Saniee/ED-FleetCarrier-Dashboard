@@ -1006,6 +1006,19 @@ body::before {
     font-size: 0.7rem;
     opacity: 0.6;
   }
+  /* Weekly chart: losses hang below the zero line, the minimum sits under it. */
+  .chart__min {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    font-family: var(--font-data);
+    font-size: 0.7rem;
+    opacity: 0.6;
+  }
+  .chart__zero {
+    stroke: var(--color-primary-5);
+    stroke-width: 1;
+  }
   .chart__axis,
   .chart__legend {
     display: flex;

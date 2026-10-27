@@ -23,7 +23,7 @@ use crate::{
 type ApiError = (StatusCode, String);
 
 /// The carrier behind `callsign`, if `user` owns it.
-async fn owned(state: &AppState, callsign: &str, user_id: i64) -> Result<i64, StatusCode> {
+pub(super) async fn owned(state: &AppState, callsign: &str, user_id: i64) -> Result<i64, StatusCode> {
     match super::carriers::resolve(state, callsign).await? {
         (id, Some(owner)) if owner == user_id => Ok(id),
         _ => Err(StatusCode::FORBIDDEN),
@@ -39,12 +39,18 @@ pub async fn get(
     let hook = webhooks::get(&state.db_pool, carrier_id).await.map_err(internal)?;
 
     Ok(Json(match hook {
-        None => json!({ "configured": false, "events": notify::EVENTS, "low_fuel_threshold": 200 }),
+        None => json!({
+            "configured": false,
+            "events": notify::EVENTS,
+            "low_fuel_threshold": 200,
+            "low_balance_weeks": 4,
+        }),
         Some(w) => json!({
             "configured": true,
             "url": discord::masked(&w.url),
             "events": w.events,
             "low_fuel_threshold": w.low_fuel_threshold,
+            "low_balance_weeks": w.low_balance_weeks,
             "enabled": w.enabled,
             "last_sent_at": w.last_sent_at,
             "last_error": w.last_error,
@@ -59,6 +65,13 @@ pub struct Settings {
     url: Option<String>,
     events: Vec<String>,
     low_fuel_threshold: i32,
+    /// Older clients leave it out; they get the default.
+    #[serde(default = "default_low_balance_weeks")]
+    low_balance_weeks: i32,
+}
+
+fn default_low_balance_weeks() -> i32 {
+    4
 }
 
 pub async fn put(
@@ -82,6 +95,9 @@ pub async fn put(
     if !(0..=1000).contains(&body.low_fuel_threshold) {
         return Err((StatusCode::BAD_REQUEST, "low_fuel_threshold must be 0-1000".to_string()));
     }
+    if !(0..=52).contains(&body.low_balance_weeks) {
+        return Err((StatusCode::BAD_REQUEST, "low_balance_weeks must be 0-52".to_string()));
+    }
     let mut events = body.events;
     events.sort();
     events.dedup();
@@ -93,6 +109,7 @@ pub async fn put(
         url.as_deref(),
         &events,
         body.low_fuel_threshold,
+        body.low_balance_weeks,
     )
     .await
     .map_err(internal_msg)?;
@@ -172,8 +189,12 @@ pub async fn watch_carrier(state: &AppState, carrier_id: Option<i64>, event: &Ca
 
 /// Announce what an applied event changed. `after` is the carrier's row now.
 pub fn carrier_changed(state: &AppState, watch: Watch, carrier_id: i64, event: &CarrierEvent, after: &Value) {
-    let threshold = if watch.hook.wants("low_fuel") { i64::from(watch.hook.low_fuel_threshold) } else { 0 };
-    let notices = notify::carrier_notices(event, &watch.before, after, threshold);
+    let on = |event: &str, value: i32| if watch.hook.wants(event) { i64::from(value) } else { 0 };
+    let alerts = notify::Alerts {
+        low_fuel: on("low_fuel", watch.hook.low_fuel_threshold),
+        low_balance_weeks: on("low_balance", watch.hook.low_balance_weeks),
+    };
+    let notices = notify::carrier_notices(event, &watch.before, after, alerts);
     send(state, &watch.hook, carrier_id, after, notices);
 }
 
