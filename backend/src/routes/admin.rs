@@ -1,0 +1,623 @@
+//! `/api/admin`: user moderation. Every handler takes `AdminUser` (403 for
+//! anyone else), and every change runs in one transaction with its audit log
+//! entry, so neither exists without the other.
+//!
+//! Safeguards: an admin can't disable, delete or demote their own account, and
+//! nobody can remove the last active admin.
+//!
+//! Carriers (`/api/admin/carriers`): reassign, release, hide or delete any
+//! carrier. Admins still can't read an `owner_only` carrier's page.
+//!
+//! Also the runtime settings (`/api/admin/settings`), the audit log
+//! (`/api/admin/audit`) and traffic and storage statistics (`/api/admin/stats`).
+
+use axum::{
+    Json,
+    extract::{Path, Query, State},
+    http::StatusCode,
+};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use sqlx::PgConnection;
+
+use crate::{
+    app_state::AppState,
+    auth::AdminUser,
+    db::{
+        admin::{self, CarrierFilter, CarrierTarget, Subject, Target},
+        settings, stats,
+        users::{ROLE_ADMIN, ROLE_USER},
+    },
+    error::{internal, internal_msg},
+};
+
+type ApiError = (StatusCode, String);
+
+fn err(status: StatusCode, msg: &str) -> ApiError {
+    (status, msg.to_string())
+}
+
+#[derive(Deserialize)]
+pub struct ListQuery {
+    #[serde(default = "default_page")]
+    page: i64,
+    #[serde(default = "default_per_page")]
+    per_page: i64,
+    q: Option<String>,
+}
+
+fn default_page() -> i64 {
+    1
+}
+
+fn default_per_page() -> i64 {
+    25
+}
+
+pub async fn list_users(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(q): Query<ListQuery>,
+) -> Result<Json<Value>, StatusCode> {
+    let page = q.page.max(1);
+    let per_page = q.per_page.clamp(1, 100);
+    let search = q.q.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+    let (items, total) =
+        admin::list_users(&state.db_pool, search, per_page, (page - 1).saturating_mul(per_page))
+            .await
+            .map_err(internal)?;
+
+    Ok(Json(json!({
+        "items": items,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": (total + per_page - 1) / per_page,
+    })))
+}
+
+pub async fn get_user(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, StatusCode> {
+    admin::user_detail(&state.db_pool, id)
+        .await
+        .map_err(internal)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+/// Lock the target account, or 404.
+async fn target(conn: &mut PgConnection, id: i64) -> Result<Target, ApiError> {
+    admin::lock_user(conn, id)
+        .await
+        .map_err(internal_msg)?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "no such user"))
+}
+
+fn not_self(admin: &AdminUser, target: &Target) -> Result<(), ApiError> {
+    if admin.0.id == target.id {
+        return Err(err(StatusCode::BAD_REQUEST, "you can't do that to your own account"));
+    }
+    Ok(())
+}
+
+/// Refuse when taking `target` out of the active admins would leave none. The
+/// acting admin is one too, so this only bites when two admins race to remove
+/// each other; `lock_user` makes the second one see the first's change.
+fn keep_an_admin(target: &Target) -> Result<(), ApiError> {
+    if target.role == ROLE_ADMIN && !target.disabled && target.other_active_admins == 0 {
+        return Err(err(StatusCode::CONFLICT, "this is the last active admin"));
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct DisableBody {
+    reason: Option<String>,
+}
+
+pub async fn disable_user(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+    Json(body): Json<DisableBody>,
+) -> Result<StatusCode, ApiError> {
+    let reason = body.reason.as_deref().map(str::trim).filter(|r| !r.is_empty());
+    if reason.is_some_and(|r| r.chars().count() > 500) {
+        return Err(err(StatusCode::BAD_REQUEST, "reason must be at most 500 characters"));
+    }
+
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let target = target(&mut tx, id).await?;
+    not_self(&admin, &target)?;
+    if target.disabled {
+        return Err(err(StatusCode::CONFLICT, "already disabled"));
+    }
+    keep_an_admin(&target)?;
+
+    admin::disable(&mut tx, id, reason).await.map_err(internal_msg)?;
+    admin::record(&mut tx, Some(admin.0.id), "user.disable", Some(Subject::User(id)),
+        json!({ "username": target.username, "reason": reason }))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn enable_user(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let target = target(&mut tx, id).await?;
+    if !target.disabled {
+        return Err(err(StatusCode::CONFLICT, "not disabled"));
+    }
+
+    admin::enable(&mut tx, id).await.map_err(internal_msg)?;
+    admin::record(&mut tx, Some(admin.0.id), "user.enable", Some(Subject::User(id)),
+        json!({ "username": target.username }))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Sign a user out everywhere. Allowed on yourself (it signs you out too).
+pub async fn revoke_sessions(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, ApiError> {
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let target = target(&mut tx, id).await?;
+
+    let revoked = admin::revoke_sessions(&mut tx, id).await.map_err(internal_msg)?;
+    admin::record(&mut tx, Some(admin.0.id), "user.revoke_sessions", Some(Subject::User(id)),
+        json!({ "username": target.username, "count": revoked }))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(Json(json!({ "revoked": revoked })))
+}
+
+pub async fn revoke_token(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path((id, token_id)): Path<(i64, i64)>,
+) -> Result<StatusCode, ApiError> {
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let target = target(&mut tx, id).await?;
+
+    let name = admin::revoke_token(&mut tx, id, token_id)
+        .await
+        .map_err(internal_msg)?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "no such token"))?;
+    admin::record(&mut tx, Some(admin.0.id), "user.revoke_token", Some(Subject::User(id)),
+        json!({ "username": target.username, "token_id": token_id, "token_name": name }))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    User,
+    Admin,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateBody {
+    role: Role,
+}
+
+pub async fn update_user(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+    Json(body): Json<UpdateBody>,
+) -> Result<StatusCode, ApiError> {
+    let role = match body.role {
+        Role::User => ROLE_USER,
+        Role::Admin => ROLE_ADMIN,
+    };
+
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let target = target(&mut tx, id).await?;
+    not_self(&admin, &target)?;
+    if target.role == role {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    if role == ROLE_USER {
+        keep_an_admin(&target)?;
+    }
+
+    admin::set_role(&mut tx, id, role).await.map_err(internal_msg)?;
+    admin::record(&mut tx, Some(admin.0.id), "user.set_role", Some(Subject::User(id)),
+        json!({ "username": target.username, "from": target.role, "to": role }))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Delete an account. Its carriers stay, with their history, but unowned: the
+/// real owner's plugin can claim them again.
+pub async fn delete_user(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, ApiError> {
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let target = target(&mut tx, id).await?;
+    not_self(&admin, &target)?;
+    keep_an_admin(&target)?;
+
+    let released = admin::delete_user(&mut tx, id).await.map_err(internal_msg)?;
+    admin::record(&mut tx, Some(admin.0.id), "user.delete", Some(Subject::User(id)),
+        json!({ "username": target.username, "released_carriers": released }))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(Json(json!({ "released_carriers": released })))
+}
+
+/// Whether registration is open: the dashboard's setting, else
+/// `ALLOW_REGISTRATION`.
+pub async fn registration_open(state: &AppState) -> sqlx::Result<bool> {
+    Ok(settings::get_bool(&state.db_pool, settings::REGISTRATION_OPEN)
+        .await?
+        .unwrap_or(state.registration_open))
+}
+
+async fn settings_view(state: &AppState) -> sqlx::Result<Value> {
+    let stored = settings::get_bool(&state.db_pool, settings::REGISTRATION_OPEN).await?;
+    Ok(json!({
+        "registration": {
+            "open": stored.unwrap_or(state.registration_open),
+            "setting": stored,
+            "env": state.registration_open,
+        }
+    }))
+}
+
+pub async fn get_settings(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+) -> Result<Json<Value>, StatusCode> {
+    settings_view(&state).await.map(Json).map_err(internal)
+}
+
+/// `default` removes the stored value so `ALLOW_REGISTRATION` applies again.
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum Registration {
+    Open,
+    Closed,
+    Default,
+}
+
+#[derive(Deserialize)]
+pub struct SettingsBody {
+    registration: Registration,
+}
+
+pub async fn update_settings(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Json(body): Json<SettingsBody>,
+) -> Result<Json<Value>, ApiError> {
+    let value = match body.registration {
+        Registration::Open => Some(true),
+        Registration::Closed => Some(false),
+        Registration::Default => None,
+    };
+
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let before = settings::set_bool(&mut tx, settings::REGISTRATION_OPEN, value)
+        .await
+        .map_err(internal_msg)?;
+    if before != value {
+        admin::record(&mut tx, Some(admin.0.id), "settings.registration", None,
+            json!({ "from": before, "to": value, "env": state.registration_open }))
+            .await
+            .map_err(internal_msg)?;
+    }
+    tx.commit().await.map_err(internal_msg)?;
+    settings_view(&state).await.map(Json).map_err(internal_msg)
+}
+
+#[derive(Deserialize)]
+pub struct AuditQuery {
+    #[serde(default = "default_page")]
+    page: i64,
+    #[serde(default = "default_per_page")]
+    per_page: i64,
+    user: Option<i64>,
+    carrier: Option<i64>,
+}
+
+pub async fn list_audit(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(q): Query<AuditQuery>,
+) -> Result<Json<Value>, StatusCode> {
+    let page = q.page.max(1);
+    let per_page = q.per_page.clamp(1, 100);
+    let subject = q.user.map(Subject::User).or(q.carrier.map(Subject::Carrier));
+
+    let (items, total) =
+        admin::list_actions(&state.db_pool, subject, per_page, (page - 1).saturating_mul(per_page))
+            .await
+            .map_err(internal)?;
+
+    Ok(Json(json!({
+        "items": items,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": (total + per_page - 1) / per_page,
+    })))
+}
+
+// --- Carriers ---------------------------------------------------------------
+
+#[derive(Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Filter {
+    #[default]
+    All,
+    Hidden,
+    Unowned,
+}
+
+#[derive(Deserialize)]
+pub struct CarrierListQuery {
+    #[serde(default = "default_page")]
+    page: i64,
+    #[serde(default = "default_per_page")]
+    per_page: i64,
+    q: Option<String>,
+    #[serde(default)]
+    filter: Filter,
+}
+
+/// Every carrier, whatever its visibility, for moderation.
+pub async fn list_carriers(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(q): Query<CarrierListQuery>,
+) -> Result<Json<Value>, StatusCode> {
+    let page = q.page.max(1);
+    let per_page = q.per_page.clamp(1, 100);
+    let search = q.q.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let filter = match q.filter {
+        Filter::All => CarrierFilter::All,
+        Filter::Hidden => CarrierFilter::Hidden,
+        Filter::Unowned => CarrierFilter::Unowned,
+    };
+
+    let (items, total) = admin::list_carriers(
+        &state.db_pool,
+        search,
+        filter,
+        per_page,
+        (page - 1).saturating_mul(per_page),
+    )
+    .await
+    .map_err(internal)?;
+
+    Ok(Json(json!({
+        "items": items,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": (total + per_page - 1) / per_page,
+    })))
+}
+
+pub async fn get_carrier(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, StatusCode> {
+    admin::carrier_detail(&state.db_pool, id)
+        .await
+        .map_err(internal)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+/// Lock the target carrier, or 404.
+async fn carrier_target(conn: &mut PgConnection, id: i64) -> Result<CarrierTarget, ApiError> {
+    admin::lock_carrier(conn, id)
+        .await
+        .map_err(internal_msg)?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "no such carrier"))
+}
+
+/// The audit detail every carrier action carries, plus `extra`. The owner at
+/// the time is recorded so their history includes actions on their carriers.
+fn carrier_entry(c: &CarrierTarget, extra: Value) -> Value {
+    let mut detail = json!({ "callsign": c.callsign, "owner_id": c.owner_id, "owner": c.owner });
+    if let (Some(d), Value::Object(e)) = (detail.as_object_mut(), extra) {
+        d.extend(e);
+    }
+    detail
+}
+
+#[derive(Deserialize)]
+pub struct OwnerBody {
+    /// The new owner's username; null leaves the carrier unowned, so its real
+    /// owner's plugin can claim it again.
+    username: Option<String>,
+}
+
+pub async fn set_carrier_owner(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+    Json(body): Json<OwnerBody>,
+) -> Result<StatusCode, ApiError> {
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let carrier = carrier_target(&mut tx, id).await?;
+    let to = match body.username.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+        Some(name) => Some(
+            admin::find_user(&mut tx, name)
+                .await
+                .map_err(internal_msg)?
+                .ok_or_else(|| err(StatusCode::NOT_FOUND, "no such user"))?,
+        ),
+        None => None,
+    };
+    let to_id = to.as_ref().map(|(id, _)| *id);
+    if to_id == carrier.owner_id {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+
+    admin::set_carrier_owner(&mut tx, id, to_id).await.map_err(internal_msg)?;
+    let (action, extra) = match &to {
+        Some((to_id, to_name)) => {
+            ("carrier.reassign", json!({ "to_owner_id": to_id, "to_owner": to_name }))
+        }
+        None => ("carrier.release", json!({})),
+    };
+    admin::record(&mut tx, Some(admin.0.id), action, Some(Subject::Carrier(id)),
+        carrier_entry(&carrier, extra))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    super::carriers::publish(&state, id).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct HideBody {
+    reason: Option<String>,
+}
+
+/// Hide a carrier from everyone but its owner and admins, whatever its
+/// visibility. The owner sees the reason.
+pub async fn hide_carrier(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+    Json(body): Json<HideBody>,
+) -> Result<StatusCode, ApiError> {
+    let reason = body.reason.as_deref().map(str::trim).filter(|r| !r.is_empty());
+    if reason.is_some_and(|r| r.chars().count() > 500) {
+        return Err(err(StatusCode::BAD_REQUEST, "reason must be at most 500 characters"));
+    }
+
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let carrier = carrier_target(&mut tx, id).await?;
+    if carrier.hidden {
+        return Err(err(StatusCode::CONFLICT, "already hidden"));
+    }
+    admin::set_carrier_hidden(&mut tx, id, Some(reason)).await.map_err(internal_msg)?;
+    admin::record(&mut tx, Some(admin.0.id), "carrier.hide", Some(Subject::Carrier(id)),
+        carrier_entry(&carrier, json!({ "reason": reason })))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    super::carriers::publish(&state, id).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn unhide_carrier(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let carrier = carrier_target(&mut tx, id).await?;
+    if !carrier.hidden {
+        return Err(err(StatusCode::CONFLICT, "not hidden"));
+    }
+    admin::set_carrier_hidden(&mut tx, id, None).await.map_err(internal_msg)?;
+    admin::record(&mut tx, Some(admin.0.id), "carrier.unhide", Some(Subject::Carrier(id)),
+        carrier_entry(&carrier, json!({})))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    super::carriers::publish(&state, id).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Delete a carrier with its history and market. The next event about it
+/// creates it afresh (and its owner's CarrierStats claims it), so this is for
+/// clearing bad data, such as an impostor holding a callsign.
+pub async fn delete_carrier(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, ApiError> {
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let carrier = carrier_target(&mut tx, id).await?;
+    let events = admin::delete_carrier(&mut tx, id).await.map_err(internal_msg)?;
+    admin::record(&mut tx, Some(admin.0.id), "carrier.delete", Some(Subject::Carrier(id)),
+        carrier_entry(&carrier, json!({ "events": events })))
+        .await
+        .map_err(internal_msg)?;
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(Json(json!({ "events": events })))
+}
+
+#[derive(Deserialize)]
+pub struct TrimQuery {
+    /// `YYYY-MM-DD` (UTC): events from before this day go.
+    before: chrono::NaiveDate,
+}
+
+/// Delete a carrier's events from before a day (by the journal's timestamp),
+/// keeping the carrier and its newer history.
+pub async fn trim_carrier_events(
+    State(state): State<AppState>,
+    admin: AdminUser,
+    Path(id): Path<i64>,
+    Query(q): Query<TrimQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let before = q.before.format("%Y-%m-%d").to_string();
+    let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
+    let carrier = carrier_target(&mut tx, id).await?;
+    let deleted = admin::trim_carrier_events(&mut tx, id, &before).await.map_err(internal_msg)?;
+    if deleted > 0 {
+        admin::record(&mut tx, Some(admin.0.id), "carrier.trim", Some(Subject::Carrier(id)),
+            carrier_entry(&carrier, json!({ "before": before, "events": deleted })))
+            .await
+            .map_err(internal_msg)?;
+    }
+    tx.commit().await.map_err(internal_msg)?;
+    Ok(Json(json!({ "deleted": deleted })))
+}
+
+// --- Traffic and storage ----------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct StatsQuery {
+    #[serde(default = "default_days")]
+    days: i32,
+}
+
+fn default_days() -> i32 {
+    30
+}
+
+/// Storage, ingest traffic per day and per account, the biggest carriers and
+/// account activity over the last `days` days (1-365).
+pub async fn stats(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(q): Query<StatsQuery>,
+) -> Result<Json<Value>, StatusCode> {
+    stats::overview(&state.db_pool, q.days.clamp(1, 365))
+        .await
+        .map(Json)
+        .map_err(internal)
+}

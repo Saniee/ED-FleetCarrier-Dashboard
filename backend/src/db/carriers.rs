@@ -5,15 +5,11 @@ use crate::journal_definitions::{
     CarrierCrewServices, CarrierEvent, CarrierJump, CarrierTradeOrder, PackOrder,
 };
 
-/// The current carrier table serialized as JSON, as published to subscribers.
 pub type CarrierSnapshot = Value;
 
-/// Apply one journal event to the `carriers` state table.
-///
-/// This module owns the `carriers` table exclusively; it never touches
-/// `carrier_events`. Returns the `carrier_id` that was written, or `None` when
-/// the event could not be attributed to a carrier (an on-foot `CarrierJump`
-/// whose system does not match any known carrier).
+/// Apply one journal event to the `carriers` table. Returns the written
+/// `carrier_id`, or `None` when the event can't be attributed to a carrier (an
+/// on-foot `CarrierJump` matching no known system).
 pub async fn apply(pool: &PgPool, event: &CarrierEvent) -> sqlx::Result<Option<i64>> {
     match event {
         CarrierEvent::CarrierBuy(e) => upsert_buy(pool, e).await.map(Some),
@@ -40,7 +36,29 @@ pub async fn apply(pool: &PgPool, event: &CarrierEvent) -> sqlx::Result<Option<i
     }
 }
 
-/// Record which history row produced the current carrier state.
+/// Store the journal's `CarrierType`. `reporter` is the visitor behind the event,
+/// if any: a visitor may set it on an unowned carrier but not change an owned
+/// one, since it drives the owner's fuel estimate.
+pub async fn set_carrier_type(
+    pool: &PgPool,
+    carrier_id: i64,
+    carrier_type: &str,
+    reporter: Option<i64>,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE carriers SET carrier_type = $2
+         WHERE carrier_id = $1
+           AND ($3::bigint IS NULL OR owner_id IS NULL OR owner_id = $3)",
+    )
+    .bind(carrier_id)
+    .bind(carrier_type)
+    .bind(reporter)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn set_last_event(
     pool: &PgPool,
     carrier_id: i64,
@@ -57,7 +75,6 @@ pub async fn set_last_event(
     Ok(())
 }
 
-/// The full carrier row as JSON, for the API response.
 pub async fn get(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<CarrierSnapshot>> {
     sqlx::query_scalar("SELECT to_jsonb(c) FROM carriers c WHERE carrier_id = $1")
         .bind(carrier_id)
@@ -65,20 +82,8 @@ pub async fn get(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Option<CarrierS
         .await
 }
 
-/// The most recently updated carrier, for single-tenant reads and as the
-/// initial payload sent to a new stream subscriber.
-pub async fn get_current(pool: &PgPool) -> sqlx::Result<Option<CarrierSnapshot>> {
-    sqlx::query_scalar("SELECT to_jsonb(c) FROM carriers c ORDER BY updated_at DESC LIMIT 1")
-        .fetch_optional(pool)
-        .await
-}
-
-/// Make sure a `carriers` row exists for `carrier_id`, creating a bare one if not.
-///
-/// A carrier's market can be the first thing we ever see for it, and
-/// `carrier_markets.carrier_id` is a foreign key onto `carriers`, so the row has
-/// to exist before a market can be stored. `DO NOTHING` leaves a carrier that
-/// already has a full row from CarrierBuy / CarrierStats untouched.
+/// Create a bare `carriers` row if none exists. A market can be the first thing
+/// seen for a carrier, and `carrier_markets` has a foreign key onto it.
 pub async fn ensure(pool: &PgPool, carrier_id: i64) -> sqlx::Result<()> {
     sqlx::query(
         "
@@ -93,10 +98,6 @@ pub async fn ensure(pool: &PgPool, carrier_id: i64) -> sqlx::Result<()> {
 
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Identity / purchase / name
-// ---------------------------------------------------------------------------
 
 async fn upsert_buy(
     pool: &PgPool,
@@ -153,10 +154,6 @@ async fn upsert_name(
     .fetch_one(pool)
     .await
 }
-
-// ---------------------------------------------------------------------------
-// Stats block (identity, access, fuel, space, finance, collections)
-// ---------------------------------------------------------------------------
 
 async fn upsert_stats(
     pool: &PgPool,
@@ -225,10 +222,6 @@ async fn upsert_stats(
     .await
 }
 
-// ---------------------------------------------------------------------------
-// Jump scheduling
-// ---------------------------------------------------------------------------
-
 async fn upsert_jump_request(
     pool: &PgPool,
     e: &crate::journal_definitions::CarrierJumpRequest,
@@ -280,10 +273,6 @@ async fn cancel_jump(
     .fetch_optional(pool)
     .await
 }
-
-// ---------------------------------------------------------------------------
-// Money and fuel
-// ---------------------------------------------------------------------------
 
 async fn upsert_bank_transfer(
     pool: &PgPool,
@@ -363,10 +352,6 @@ async fn upsert_finance(
     .await
 }
 
-// ---------------------------------------------------------------------------
-// Access
-// ---------------------------------------------------------------------------
-
 async fn upsert_docking_access(
     pool: &PgPool,
     e: &crate::journal_definitions::CarrierDockingPermission,
@@ -388,10 +373,6 @@ async fn upsert_docking_access(
     .fetch_one(pool)
     .await
 }
-
-// ---------------------------------------------------------------------------
-// Location
-// ---------------------------------------------------------------------------
 
 async fn upsert_location(
     pool: &PgPool,
@@ -434,12 +415,8 @@ async fn upsert_location(
     .await
 }
 
-/// Set the resolved body name for a carrier, or clear it when the name could not
-/// be resolved.
-///
-/// Kept separate from `upsert_location` because the name comes from a lookup
-/// rather than the event. `updated_at` is deliberately left alone: this is a
-/// detail filled in behind an event, not an event of its own.
+/// Set the resolved body name, or clear it. Separate from `upsert_location`
+/// because the name comes from a lookup; leaves `updated_at` alone.
 pub async fn set_body(
     pool: &PgPool,
     carrier_id: i64,
@@ -456,14 +433,9 @@ pub async fn set_body(
     Ok(())
 }
 
-/// `CarrierJump` arrives in two shapes:
-///
-/// * docked — carries `MarketID` (equal to the carrier's `CarrierID`) and the
-///   full station block. Identified directly and upserted.
-/// * on foot — omits `MarketID` and the station block. It is attributed to the
-///   carrier whose current `system_address` matches. This assumes at most one
-///   tracked carrier sits in a given system; a multi-carrier deployment sharing
-///   a system would need a stronger link.
+/// `CarrierJump` arrives docked (with `MarketID`, equal to `CarrierID`) or on
+/// foot (without). An on-foot jump is attributed to the carrier whose
+/// `system_address` matches, which assumes one tracked carrier per system.
 async fn apply_jump(pool: &PgPool, j: &CarrierJump) -> sqlx::Result<Option<i64>> {
     let star_x = j.star_pos.first().copied();
     let star_y = j.star_pos.get(1).copied();
@@ -624,10 +596,6 @@ async fn apply_jump(pool: &PgPool, j: &CarrierJump) -> sqlx::Result<Option<i64>>
     }
 }
 
-// ---------------------------------------------------------------------------
-// Collections stored as jsonb
-// ---------------------------------------------------------------------------
-
 /// Read a jsonb column for a carrier, defaulting to the supplied value when the
 /// row is missing or the column is NULL.
 async fn read_jsonb(
@@ -649,7 +617,6 @@ async fn read_jsonb(
 
     match row {
         Some(Some(value)) => Ok((true, value)),
-        // Row exists but the column is NULL.
         Some(None) => Ok((true, default)),
         None => Ok((false, default)),
     }
@@ -790,4 +757,185 @@ async fn trade_order(pool: &PgPool, e: &CarrierTradeOrder) -> sqlx::Result<i64> 
     }
 
     write_jsonb(pool, e.carrier_id, "trade_orders", &orders).await
+}
+
+pub enum Ownership {
+    /// No row: the carrier has never been seen.
+    Missing,
+    /// A row nobody has claimed.
+    Unowned,
+    Owned(i64),
+}
+
+pub async fn ownership(pool: &PgPool, carrier_id: i64) -> sqlx::Result<Ownership> {
+    let owner: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT owner_id FROM carriers WHERE carrier_id = $1")
+            .bind(carrier_id)
+            .fetch_optional(pool)
+            .await?;
+
+    Ok(match owner {
+        None => Ownership::Missing,
+        Some(None) => Ownership::Unowned,
+        Some(Some(id)) => Ownership::Owned(id),
+    })
+}
+
+/// Record whether the location just written came from someone other than the
+/// owner. `reporter` is the reporting user, or `None` for the legacy token,
+/// which is trusted. An unowned carrier's location is never verified.
+pub async fn set_location_unverified(
+    pool: &PgPool,
+    carrier_id: i64,
+    reporter: Option<i64>,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE carriers
+         SET location_unverified = ($2::bigint IS NOT NULL AND owner_id IS DISTINCT FROM $2)
+         WHERE carrier_id = $1",
+    )
+    .bind(carrier_id)
+    .bind(reporter)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// A carrier found by callsign, with what decides who may read it.
+#[derive(sqlx::FromRow)]
+pub struct Found {
+    pub carrier_id: i64,
+    pub owner_id: Option<i64>,
+    pub visibility: String,
+    /// The owner's account is disabled.
+    pub owner_disabled: bool,
+    /// An admin hid the carrier.
+    pub hidden: bool,
+}
+
+/// A carrier by callsign, case-insensitively.
+pub async fn find_by_callsign(pool: &PgPool, callsign: &str) -> sqlx::Result<Option<Found>> {
+    sqlx::query_as(
+        "SELECT c.carrier_id, c.owner_id, c.visibility,
+                coalesce(u.disabled_at IS NOT NULL, false) AS owner_disabled,
+                c.moderation_hidden_at IS NOT NULL AS hidden
+         FROM carriers c LEFT JOIN users u ON u.id = c.owner_id
+         WHERE upper(c.callsign) = upper($1)",
+    )
+    .bind(callsign)
+    .fetch_optional(pool)
+    .await
+}
+
+/// Claim an unowned carrier. `false` when it was already owned by someone.
+pub async fn claim(pool: &PgPool, carrier_id: i64, user_id: i64) -> sqlx::Result<bool> {
+    let done = sqlx::query(
+        "UPDATE carriers SET owner_id = $2 WHERE carrier_id = $1 AND owner_id IS NULL",
+    )
+    .bind(carrier_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
+/// Release a carrier. `false` when `user_id` does not own it.
+pub async fn release(pool: &PgPool, carrier_id: i64, user_id: i64) -> sqlx::Result<bool> {
+    let done = sqlx::query(
+        "UPDATE carriers SET owner_id = NULL WHERE carrier_id = $1 AND owner_id = $2",
+    )
+    .bind(carrier_id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
+/// Update the owner's settings; `None` leaves a setting as it is. `visibility`
+/// is `public`, `private` or `owner_only`. `false` when `user_id` does not own
+/// the carrier.
+pub async fn set_settings(
+    pool: &PgPool,
+    carrier_id: i64,
+    user_id: i64,
+    visibility: Option<&str>,
+    is_squadron: Option<bool>,
+) -> sqlx::Result<bool> {
+    let done = sqlx::query(
+        "UPDATE carriers
+         SET visibility = COALESCE($3, visibility),
+             is_squadron = COALESCE($4, is_squadron)
+         WHERE carrier_id = $1 AND owner_id = $2",
+    )
+    .bind(carrier_id)
+    .bind(user_id)
+    .bind(visibility)
+    .bind(is_squadron)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
+pub async fn list_owned(pool: &PgPool, user_id: i64) -> sqlx::Result<Vec<Value>> {
+    sqlx::query_scalar(
+        "SELECT jsonb_build_object(
+             'carrier_id', carrier_id, 'callsign', callsign, 'name', name,
+             'star_system', star_system, 'visibility', visibility,
+             'carrier_type', carrier_type, 'is_squadron', is_squadron, 'updated_at', updated_at,
+             'moderation_hidden_at', moderation_hidden_at, 'moderation_reason', moderation_reason)
+         FROM carriers WHERE owner_id = $1 ORDER BY updated_at DESC",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+}
+
+/// One page of public carriers with a callsign, most recently active first, plus
+/// the total count. Hidden carriers and those of disabled accounts are left out. `search` matches callsign, name or system.
+pub async fn list_public(
+    pool: &PgPool,
+    search: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<(Vec<Value>, i64)> {
+    let pattern = search.map(|s| {
+        let escaped = s
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        format!("%{escaped}%")
+    });
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM carriers
+         WHERE visibility = 'public' AND callsign IS NOT NULL AND
+               moderation_hidden_at IS NULL AND
+               NOT EXISTS (SELECT 1 FROM users u WHERE u.id = owner_id AND u.disabled_at IS NOT NULL) AND
+               ($1::text IS NULL OR callsign ILIKE $1 OR name ILIKE $1 OR star_system ILIKE $1)",
+    )
+    .bind(&pattern)
+    .fetch_one(pool)
+    .await?;
+
+    let items = sqlx::query_scalar(
+        "SELECT jsonb_build_object(
+             'carrier_id', carrier_id, 'callsign', callsign, 'name', name,
+             'variant', variant, 'carrier_type', carrier_type, 'is_squadron', is_squadron,
+             'star_system', star_system, 'docked', docked,
+             'docking_access', docking_access, 'location_unverified', location_unverified,
+             'updated_at', updated_at)
+         FROM carriers
+         WHERE visibility = 'public' AND callsign IS NOT NULL AND
+               moderation_hidden_at IS NULL AND
+               NOT EXISTS (SELECT 1 FROM users u WHERE u.id = owner_id AND u.disabled_at IS NOT NULL) AND
+               ($1::text IS NULL OR callsign ILIKE $1 OR name ILIKE $1 OR star_system ILIKE $1)
+         ORDER BY updated_at DESC, carrier_id LIMIT $2 OFFSET $3",
+    )
+    .bind(&pattern)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
+
+    Ok((items, total))
 }

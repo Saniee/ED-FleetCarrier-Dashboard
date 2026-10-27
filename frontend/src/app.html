@@ -3,11 +3,21 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<link rel="icon" type="image/svg+xml" href="%sveltekit.assets%/favicon-standard.svg" />
+		<script nonce="%sveltekit.nonce%">
+			// Before first paint, so stored preferences don't flash the defaults.
+			// See lib/theme.svelte.ts and lib/motion.svelte.ts.
+			try {
+				if (localStorage.getItem('theme') === 'alien') document.documentElement.setAttribute('data-theme', 'alien');
+				if (localStorage.getItem('motion') === 'full') document.documentElement.setAttribute('data-motion', 'full');
+			} catch {}
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover" class="terminal-content">
 		<div class="fx__scanlines"></div>
     	<div class="fx__overlay"></div>
+		<div class="fx__boot"></div>
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>

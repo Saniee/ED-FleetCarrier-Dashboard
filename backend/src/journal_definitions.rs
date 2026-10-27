@@ -46,11 +46,9 @@ macro_rules! carrier_event_accessors {
                 }
             }
 
-            /// The carrier this event belongs to.
-            ///
-            /// `CarrierJump` carries no `CarrierID`, but for fleet carriers the
-            /// station `MarketID` equals the `CarrierID`. The on-foot variant
-            /// omits `MarketID` entirely and returns `None`.
+            /// The carrier this event belongs to. `CarrierJump` has no `CarrierID`,
+            /// but a fleet carrier's station `MarketID` equals it; the on-foot
+            /// variant omits both and returns `None`.
             pub fn carrier_id(&self) -> Option<i64> {
                 match self {
                     $(Self::$with_id(e) => Some(e.carrier_id),)+
@@ -61,6 +59,20 @@ macro_rules! carrier_event_accessors {
     };
 }
 
+
+impl CarrierEvent {
+    /// The journal's `CarrierType` (`FleetCarrier` / `SquadronCarrier`), on the
+    /// few events that carry it.
+    pub fn carrier_type(&self) -> Option<&str> {
+        match self {
+            Self::CarrierBuy(e) => e.carrier_type.as_deref(),
+            Self::CarrierStats(e) => e.carrier_type.as_deref(),
+            Self::CarrierFinance(e) => e.carrier_type.as_deref(),
+            Self::CarrierLocation(e) => e.carrier_type.as_deref(),
+            _ => None,
+        }
+    }
+}
 
 carrier_event_accessors! {
     with_id: [
@@ -84,24 +96,17 @@ carrier_event_accessors! {
     ],
 }
 
-/// Parse one raw journal line. `None` = not a known carrier event (or malformed).
 pub fn parse_carrier_event(line: &str) -> Option<CarrierEvent> {
     serde_json::from_str(line).ok()
 }
 
-/// Parse one raw `Market` line, or a whole `Market.json` document.
-///
-/// `None` = malformed, or an event that is not `Market`. Markets are not part of
-/// `CarrierEvent`: the event fires for every station the commander docks at, and
-/// a market is its own domain rather than a carrier state change.
+/// Parse one raw `Market` line or a whole `Market.json`; `None` if malformed or
+/// not `Market`. Markets aren't part of `CarrierEvent`: the event fires for every
+/// station the commander docks at.
 pub fn parse_market_event(line: &str) -> Option<MarketEvent> {
     let market: MarketEvent = serde_json::from_str(line).ok()?;
     (market.event == "Market").then_some(market)
 }
-
-// ---------------------------------------------------------------------------
-// Events
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -109,7 +114,6 @@ pub struct CarrierJump {
     #[serde(rename = "timestamp")]
     pub timestamp: String,
     pub docked: bool,
-    /// Present only on the on-foot variant of the event.
     pub on_foot: Option<bool>,
     // The station block is absent when the carrier jumps while the commander is
     // on foot in the destination system, so every one of these is optional.
@@ -148,7 +152,6 @@ pub struct CarrierJump {
     #[serde(rename = "BodyID")]
     pub body_id: i64,
     pub body_type: String,
-    /// Absent on some docked jumps.
     pub system_faction: Option<Faction>,
 }
 
@@ -165,6 +168,7 @@ pub struct CarrierBuy {
     pub price: i64,
     pub variant: String,
     pub callsign: String,
+    pub carrier_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -186,6 +190,7 @@ pub struct CarrierStats {
     pub crew: Vec<Crew>,
     pub ship_packs: Vec<Pack>,
     pub module_packs: Vec<Pack>,
+    pub carrier_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -262,6 +267,7 @@ pub struct CarrierFinance {
     pub reserve_balance: i64,
     pub available_balance: i64,
     pub reserve_percent: i64,
+    pub carrier_type: Option<String>,
     #[serde(rename = "TaxRate_shipyard")]
     pub tax_rate_shipyard: Option<i64>,
     #[serde(rename = "TaxRate_rearm")]
@@ -348,11 +354,8 @@ pub struct CarrierLocation {
     pub system_address: i64,
     #[serde(rename = "BodyID")]
     pub body_id: i64,
+    pub carrier_type: Option<String>,
 }
-
-// ---------------------------------------------------------------------------
-// Nested types
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -421,19 +424,10 @@ pub struct Faction {
     pub name: String,
 }
 
-// ---------------------------------------------------------------------------
-// Market
-// ---------------------------------------------------------------------------
-
-/// The `StationType` a fleet carrier's market reports.
 pub const FLEET_CARRIER_STATION_TYPE: &str = "FleetCarrier";
 
-/// The `Market` journal event, as written to `Market.json`.
-///
-/// The journal line carries only the header; the commodity list lives in
-/// `Market.json`, which repeats the header and adds `Items`. The ingest plugin
-/// merges the two, so this is the whole payload either way — and it splits
-/// cleanly into the event header and the commodities it lists.
+/// The `Market` event as written to `Market.json`: the journal line has only the
+/// header, `Market.json` adds `Items`, and the plugin merges the two.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct MarketEvent {
@@ -454,8 +448,6 @@ pub struct MarketEvent {
 }
 
 impl MarketEvent {
-    /// Whether this market belongs to a fleet carrier.
-    ///
     /// The journal emits `Market` for every station; only the carrier's own
     /// market is tracked, so ingest drops anything else.
     pub fn is_fleet_carrier(&self) -> bool {
@@ -526,7 +518,6 @@ mod tests {
 
     const CARRIER_LOCATION: &str = r#"{ "timestamp":"2026-09-19T22:57:29Z", "event":"CarrierLocation", "CarrierType":"FleetCarrier", "CarrierID":3713341952, "StarSystem":"L 190-21", "SystemAddress":2621834266987, "BodyID":12 }"#;
 
-    // Docked jump: carries MarketID, which equals the CarrierID.
     const CARRIER_JUMP_DOCKED: &str = r#"{ "timestamp":"2026-09-20T14:58:12Z", "event":"CarrierJump", "Docked":true, "StationName":"KLJ-97Z", "StationType":"FleetCarrier", "MarketID":3713341952, "StationFaction":{ "Name":"FleetCarrier" }, "StationGovernment":"$government_Carrier;", "StationGovernment_Localised":"Private Ownership", "StationServices":[ "dock", "refuel" ], "StationEconomy":"$economy_Carrier;", "StationEconomy_Localised":"Private Enterprise", "StationEconomies":[ { "Name":"$economy_Carrier;", "Name_Localised":"Private Enterprise", "Proportion":1.000000 } ], "Taxi":false, "Multicrew":false, "StarSystem":"18 Camelopardalis", "SystemAddress":388434495835, "StarPos":[-57.93750,31.96875,-122.56250], "SystemAllegiance":"", "SystemEconomy":"$economy_None;", "SystemEconomy_Localised":"None", "SystemSecondEconomy":"$economy_None;", "SystemSecondEconomy_Localised":"None", "SystemGovernment":"$government_None;", "SystemGovernment_Localised":"None", "SystemSecurity":"$GAlAXY_MAP_INFO_state_anarchy;", "SystemSecurity_Localised":"Anarchy", "Population":0, "Body":"18 Camelopardalis A", "BodyID":2, "BodyType":"Star" }"#;
 
     // On-foot jump: no MarketID and no station block.
@@ -605,7 +596,6 @@ mod tests {
     // A carrier market exactly as `Market.json` writes it: header plus items.
     const MARKET_CARRIER: &str = r#"{ "timestamp":"2026-10-04T13:56:55Z", "event":"Market", "MarketID":3713341952, "StationName":"KLJ-97Z", "StationType":"FleetCarrier", "CarrierDockingAccess":"all", "StarSystem":"Pegasi Sector HX-T b3-0", "Items":[ { "id":129046165, "Name":"$iridium_name;", "Name_Localised":"Iridium", "Category":"$MARKET_category_metals;", "Category_Localised":"Metals", "BuyPrice":799015, "SellPrice":0, "MeanPrice":0, "StockBracket":0, "DemandBracket":0, "Stock":0, "Demand":0, "Consumer":false, "Producer":false, "Rare":false } ] }"#;
 
-    // The journal line for that same market: header only, no Items.
     const MARKET_JOURNAL_LINE: &str = r#"{ "timestamp":"2026-10-04T13:56:55Z", "event":"Market", "MarketID":3713341952, "StationName":"KLJ-97Z", "StationType":"FleetCarrier", "CarrierDockingAccess":"all", "StarSystem":"Pegasi Sector HX-T b3-0" }"#;
 
     // A regular station market, which ingest drops.

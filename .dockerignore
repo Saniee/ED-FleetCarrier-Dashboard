@@ -1,0 +1,12 @@
+# Build context for backend/Dockerfile (the repo root). Only backend/ and
+# edmc-plugin/ are used; keep everything else, above all target/ and
+# node_modules/, out of the context.
+*
+!backend/Cargo.toml
+!backend/Cargo.lock
+!backend/build.rs
+!backend/src/
+!backend/migrations/
+!backend/dev/
+!edmc-plugin/
+**/__pycache__

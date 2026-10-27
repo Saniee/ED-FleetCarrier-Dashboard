@@ -1,12 +1,7 @@
 import type { CarrierEventRow } from './types/carrier';
 import { formatNumber, formatCredits } from './format';
 
-/**
- * One-line description of a history row, for the log table's Detail column.
- *
- * Pure — no reactivity, no DOM — so it can be unit-tested or reused elsewhere.
- * Narrows on `json_data.event`, so each branch only sees its own fields.
- */
+/** One-line description of a history row, for the log table's Detail column. */
 export function eventSummary(row: CarrierEventRow): string {
 	const e = row.json_data;
 	switch (e.event) {

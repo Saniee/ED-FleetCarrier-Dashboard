@@ -1,39 +1,34 @@
+import { api, auth } from './auth.svelte';
+import { openStream } from './sse';
 import type { Carrier, CarrierEventRow } from './types/carrier';
 import type { MarketSnapshot } from './types/market';
 
-/** Connection state as shown in the status badge. */
 export type CarrierStatus = 'connecting' | 'connected' | 'OFFLINE';
 
-/** Exponential backoff for stream rebuilds. */
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
 
 /**
- * How often to probe the API for liveness.
- *
- * The stream cannot be trusted to report its own death: when the backend goes
- * away the dev proxy leaves the SSE connection open, so the browser never fires
- * `onerror` and the page would sit on stale data forever. The probe is what
- * actually notices the API disappearing — and coming back.
+ * How often to probe the API for liveness. The stream can't report its own death
+ * (the dev proxy keeps the SSE connection open), so the probe is what notices the
+ * API going away and coming back.
  */
 const PING_MS = 5000;
 
-/** Rows requested for the history table. */
 export const HISTORY_LIMIT = 20;
 
 /**
- * Live carrier feed: the SSE stream, its reconnect backoff, a liveness probe,
- * and the history fetch that follows whichever carrier is current.
- *
- * Call `start()` on mount and `stop()` on teardown.
+ * Live feed for one callsign: SSE stream, reconnect backoff, liveness probe and
+ * history fetch. Call `start()` on mount and `stop()` on teardown.
  */
-export function createCarrierFeed(initial: Carrier | null) {
+export function createCarrierFeed(initial: Carrier | null, callsign: string) {
+	const base = `/api/carriers/${encodeURIComponent(callsign)}`;
 	let carrier = $state<Carrier | null>(initial);
 	let events = $state<CarrierEventRow[] | null>(null);
 	let market = $state<MarketSnapshot | null>(null);
 	let status = $state<CarrierStatus>('connecting');
 
-	let source: EventSource | undefined;
+	let source: { close: () => void } | undefined;
 	let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	let pingTimer: ReturnType<typeof setInterval> | undefined;
 	let attempt = 0;
@@ -41,10 +36,10 @@ export function createCarrierFeed(initial: Carrier | null) {
 	// Guards against a slow history response landing after a newer one.
 	let historySeq = 0;
 
-	async function loadHistory(carrierId: number) {
+	async function loadHistory() {
 		const seq = ++historySeq;
 		try {
-			const res = await fetch(`/api/carrier/${carrierId}/events?limit=${HISTORY_LIMIT}`);
+			const res = await api(`${base}/events?limit=${HISTORY_LIMIT}`);
 			if (!res.ok) return;
 			const rows: CarrierEventRow[] = await res.json();
 			if (seq === historySeq) events = rows;
@@ -54,43 +49,33 @@ export function createCarrierFeed(initial: Carrier | null) {
 	}
 
 	function connect() {
-		source = new EventSource('/api/carrier/stream');
-
-		source.onopen = () => {
-			attempt = 0;
-			status = 'connected';
-		};
-
-		source.addEventListener('carrier', (e) => {
-			const next = JSON.parse((e as MessageEvent).data) as Carrier;
-			carrier = next;
-			void loadHistory(next.carrier_id);
+		source = openStream(`${base}/stream`, auth.token, {
+			onopen: () => {
+				attempt = 0;
+				status = 'connected';
+			},
+			onmessage: (event, data) => {
+				if (event === 'carrier') {
+					carrier = JSON.parse(data) as Carrier;
+					void loadHistory();
+				} else if (event === 'market') {
+					// The market arrives whole — header plus commodities — on the same
+					// connection, both when a Market event is ingested and on subscribe,
+					// so there is no separate fetch to keep in step.
+					market = JSON.parse(data) as MarketSnapshot;
+				}
+			},
+			onclose: () => {
+				source = undefined;
+				status = 'OFFLINE';
+				scheduleReconnect();
+			}
 		});
-
-		// The market arrives whole — header plus commodities — on the same
-		// connection, both when a Market event is ingested and on subscribe, so
-		// there is no separate fetch to keep in step.
-		source.addEventListener('market', (e) => {
-			market = JSON.parse((e as MessageEvent).data) as MarketSnapshot;
-		});
-
-		source.onerror = () => {
-			// The browser retries on its own while CONNECTING. A CLOSED stream is
-			// the case it gives up on — an error response, e.g. the proxy's 500
-			// when the backend is down, since that isn't text/event-stream.
-			if (source?.readyState !== EventSource.CLOSED) return;
-
-			source.close();
-			source = undefined;
-			status = 'OFFLINE';
-			scheduleReconnect();
-		};
 	}
 
 	function scheduleReconnect() {
 		if (reconnectTimer !== undefined) return;
 
-		// Exponential backoff, capped. attempt resets on a successful open.
 		const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_MAX_MS);
 		attempt++;
 
@@ -113,7 +98,6 @@ export function createCarrierFeed(initial: Carrier | null) {
 		if (!alive) {
 			if (status !== 'OFFLINE') {
 				status = 'OFFLINE';
-				// Drop the dead stream so it cannot linger; the probe reopens it.
 				source?.close();
 				source = undefined;
 				if (reconnectTimer !== undefined) {
@@ -124,7 +108,6 @@ export function createCarrierFeed(initial: Carrier | null) {
 			return;
 		}
 
-		// API is up again: rebuild the stream immediately.
 		if (!source) {
 			if (reconnectTimer !== undefined) {
 				clearTimeout(reconnectTimer);
@@ -136,9 +119,17 @@ export function createCarrierFeed(initial: Carrier | null) {
 		}
 	}
 
+	/** Re-read the carrier row, for changes the stream does not announce (claim, privacy). */
+	async function reload() {
+		try {
+			const res = await api(base);
+			if (res.ok) carrier = (await res.json()) as Carrier;
+		} catch {
+		}
+	}
+
 	function start() {
-		// Seed history from the load function's carrier before the first event.
-		if (carrier) void loadHistory(carrier.carrier_id);
+		if (carrier) void loadHistory();
 
 		connect();
 		pingTimer = setInterval(ping, PING_MS);
@@ -164,6 +155,7 @@ export function createCarrierFeed(initial: Carrier | null) {
 		get status() {
 			return status;
 		},
+		reload,
 		start,
 		stop,
 	};

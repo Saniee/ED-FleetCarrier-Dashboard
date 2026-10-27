@@ -1,21 +1,15 @@
 use sqlx::PgPool;
 
-/// What the cache knows about one body.
 pub enum Cached {
-    /// Never looked up.
     Unknown,
     /// Looked up, and EDSM had no such body.
     Absent,
-    /// Looked up and found.
     Named {
         name: String,
         body_type: Option<String>,
     },
 }
 
-/// The cached name for a body.
-///
-/// This module owns `body_names` and nothing else.
 pub async fn get(pool: &PgPool, system_address: i64, body_id: i64) -> sqlx::Result<Cached> {
     // Decoded as a tuple rather than a struct: a missing row and a row holding
     // NULLs mean different things here, and `fetch_optional` keeps them apart.
@@ -28,9 +22,7 @@ pub async fn get(pool: &PgPool, system_address: i64, body_id: i64) -> sqlx::Resu
     .await?;
 
     Ok(match row {
-        // Never asked.
         None => Cached::Unknown,
-        // Asked, and EDSM had nothing.
         Some((None, _)) => Cached::Absent,
         Some((Some(name), body_type)) => Cached::Named { name, body_type },
     })

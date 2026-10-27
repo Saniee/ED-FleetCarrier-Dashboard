@@ -2,14 +2,9 @@ use sqlx::{PgPool, types::Json};
 
 use crate::journal_definitions::CarrierEvent;
 
-/// Append one raw event to the `carrier_events` history.
-///
-/// This module owns the `carrier_events` table and nothing else. `carrier_id`
-/// is resolved by the caller (`db::carriers`) so that the foreign key on
-/// `carrier_events.carrier` is satisfied before the row is written.
-///
-/// Returns the new row's `id`, which callers stamp onto the carrier as
-/// `last_event_id`.
+/// Append one raw event to `carrier_events`, returning its `id` (stamped on the
+/// carrier as `last_event_id`). `carrier_id` is resolved by the caller so the
+/// foreign key holds.
 pub async fn insert(
     pool: &PgPool,
     event: &CarrierEvent,

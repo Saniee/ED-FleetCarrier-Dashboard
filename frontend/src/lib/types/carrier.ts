@@ -1,19 +1,9 @@
+import type { Visibility } from '../visibility';
+
 /**
- * Types for the carrier API.
- *
- * The API serializes each row with Postgres `to_jsonb(carriers)`, which shapes
- * the JSON in ways worth knowing:
- *
- *  - keys are the snake_case column names, exactly as in the DB;
- *  - nullable columns are present as `null`, they are NOT omitted — so these
- *    are `| null`, not optional `?`;
- *  - `bigint` columns arrive as JSON numbers (safe here: Elite IDs and system
- *    addresses stay well under `Number.MAX_SAFE_INTEGER`);
- *  - `updated_at` is an ISO-8601 string with an offset, e.g.
- *    `"2026-09-28T16:51:08.077942+00:00"`;
- *  - `text[]` becomes a JSON array of strings;
- *  - jsonb collections keep the journal's PascalCase keys, because they are
- *    stored from the parsed event structs rather than re-mapped.
+ * Types for the carrier API. Rows come from Postgres `to_jsonb`: keys are the
+ * snake_case column names, nullable columns are `null` (not omitted), bigints are
+ * plain numbers, and jsonb collections keep the journal's PascalCase keys.
  */
 
 /** One entry of `crew`. Only activated roles carry `Enabled` / `CrewName`. */
@@ -24,15 +14,14 @@ export interface CrewMember {
 	CrewName: string | null;
 }
 
-/** One entry of `ship_packs` / `module_packs`. */
 export interface Pack {
 	PackTheme: string;
 	PackTier: number;
 }
 
 /**
- * One entry of `trade_orders`, keyed by commodity (e.g. `"iridium"`).
- * A purchase order sets `PurchaseOrder`, a sale order sets `SaleOrder`.
+ * One entry of `trade_orders`, keyed by commodity (e.g. `"iridium"`); sets
+ * `PurchaseOrder` or `SaleOrder`.
  */
 export interface TradeOrder {
 	Price?: number;
@@ -41,7 +30,6 @@ export interface TradeOrder {
 	SaleOrder?: number;
 }
 
-/** One entry of `station_economies`. */
 export interface StationEconomy {
 	Name: string;
 	Name_Localised: string | null;
@@ -49,16 +37,21 @@ export interface StationEconomy {
 }
 
 /**
- * A row of the `carriers` table — one fleet carrier's latest known state.
- * Every column except `carrier_id` and `updated_at` is nullable, because a
- * carrier's row is filled in gradually as different journal events arrive.
+ * A row of `carriers`: one carrier's latest state. Everything but `carrier_id`
+ * and `updated_at` is nullable, since rows fill in as events arrive.
  */
+export type CarrierType = 'FleetCarrier' | 'SquadronCarrier' | (string & {});
+
 export interface Carrier {
 	// Identity
 	carrier_id: number;
 	callsign: string | null;
 	name: string | null;
 	market_id: number | null;
+	/** The journal's `CarrierType`: 'FleetCarrier' or 'SquadronCarrier'. */
+	carrier_type: CarrierType;
+	/** Owner's designation as a squadron carrier; unrelated to `carrier_type`. */
+	is_squadron: boolean;
 
 	// Purchase
 	variant: string | null;
@@ -149,15 +142,21 @@ export interface Carrier {
 
 	// Bookkeeping
 	last_event_id: number | null;
+
+	// Tenancy
+	owner_id: number | null;
+	visibility: Visibility;
+	/** Set while an admin has hidden the carrier: only the owner and admins see it. */
+	moderation_hidden_at: string | null;
+	moderation_reason: string | null;
+	/** Location last reported by someone other than the owner; show a `*`. */
+	location_unverified: boolean;
 	updated_at: string;
 }
 
 /**
- * A row of `carrier_events` as returned by
- * `GET /api/carrier/{carrier_id}/events?limit=N`.
- *
- * `carrier` is null for events that could not be attributed to a carrier
- * (an on-foot `CarrierJump` whose system matched nothing).
+ * A row of `carrier_events` from `GET /api/carriers/{callsign}/events`; `carrier`
+ * is null for events that couldn't be attributed (an on-foot `CarrierJump`).
  */
 export interface CarrierEventRow {
 	id: number;
@@ -167,12 +166,10 @@ export interface CarrierEventRow {
 	carrier: number | null;
 }
 
-/** A faction reference, e.g. `{ "Name": "The Dark Wheel" }`. */
 export interface Faction {
 	Name: string;
 }
 
-/** `CarrierStats.SpaceUsage`. */
 export interface SpaceUsage {
 	TotalCapacity: number;
 	Crew: number;
@@ -183,10 +180,7 @@ export interface SpaceUsage {
 	FreeSpace: number;
 }
 
-/**
- * `CarrierStats.Finance`. The early report after purchase carries only the
- * three balances, so the rest are nullable.
- */
+/** `CarrierStats.Finance`; the early post-purchase report has only the three balances. */
 export interface Finance {
 	CarrierBalance: number;
 	ReserveBalance: number;
@@ -199,15 +193,9 @@ export interface Finance {
 	TaxRate_repair: number | null;
 }
 
-// ---------------------------------------------------------------------------
-// Journal events, as stored in `carrier_events.json_data`
-//
-// These mirror the backend's `CarrierEvent` enum: an internally tagged union on
-// `event`. Two consequences of that round-trip:
-//   - optional fields are present as explicit `null`, never omitted;
-//   - unknown journal keys (CarrierType, and CarrierNameChange's malformed `""`)
-//     are dropped by the parser and do not appear here.
-// ---------------------------------------------------------------------------
+// Journal events as stored in `carrier_events.json_data`, mirroring the backend's
+// `CarrierEvent` enum (tagged on `event`). Optional fields are explicit `null`,
+// and unknown journal keys are dropped.
 
 export interface CarrierJumpEvent {
 	event: 'CarrierJump';
@@ -400,7 +388,6 @@ export interface CarrierLocationEvent {
 	BodyID: number;
 }
 
-/** The raw journal event stored in `json_data`, discriminated on `event`. */
 export type CarrierEventJson =
 	| CarrierJumpEvent
 	| CarrierBuyEvent
@@ -418,5 +405,31 @@ export type CarrierEventJson =
 	| CarrierNameChangeEvent
 	| CarrierLocationEvent;
 
-/** Every event name the API can return in `event_name`. */
 export type CarrierEventName = CarrierEventJson['event'];
+
+/** One row of `GET /api/carriers` (and `/api/carriers/mine`, which adds `visibility`). */
+export interface CarrierListItem {
+	carrier_id: number;
+	callsign: string | null;
+	name: string | null;
+	variant?: string | null;
+	carrier_type?: CarrierType;
+	is_squadron?: boolean;
+	star_system: string | null;
+	docked?: boolean | null;
+	docking_access?: string | null;
+	location_unverified?: boolean;
+	visibility?: Visibility;
+	/** `/api/carriers/mine` only: set while an admin has hidden the carrier. */
+	moderation_hidden_at?: string | null;
+	moderation_reason?: string | null;
+	updated_at: string;
+}
+
+export interface CarrierPage {
+	items: CarrierListItem[];
+	page: number;
+	per_page: number;
+	total: number;
+	total_pages: number;
+}

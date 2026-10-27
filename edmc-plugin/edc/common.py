@@ -6,8 +6,8 @@ import os
 
 from config import appname  # type: ignore  # provided by EDMC
 
-PLUGIN_NAME = "ed-commander"
-__version__ = "1.2.0"
+PLUGIN_NAME = "ed-fleetcarriers-connector"
+__version__ = "1.2.1"
 
 # EDMC logs a plugin under "<appname>.<plugin folder>"; use the same name so our
 # lines are attributed to this plugin in EDMarketConnector.log.
@@ -15,6 +15,8 @@ _PLUGIN_FOLDER = os.path.basename(os.path.dirname(os.path.dirname(os.path.abspat
 logger = logging.getLogger(f"{appname}.{_PLUGIN_FOLDER}")
 
 # --- EDMC config keys (unique prefix so we never clash with other plugins) ---
+# EDMC stores the settings under these keys: keep them if the plugin is renamed,
+# or existing users lose their URL and token.
 CFG_URL = "edcommander_url"
 CFG_TOKEN = "edcommander_token"
 CFG_ENABLED = "edcommander_enabled"

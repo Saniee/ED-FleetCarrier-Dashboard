@@ -1,19 +1,9 @@
 /**
- * Types for the carrier market API.
- *
- * The API answers with an envelope of two parts, mirroring the two tables the
- * backend stores:
- *
- *   - `event`       — the header of the last `Market` journal event
- *                     (`carrier_markets`): which station, where, and when;
- *   - `commodities` — every item that event listed (`market_commodities`).
- *
- * As with the carrier types, rows are serialized with Postgres `to_jsonb`, so
- * keys are the snake_case column names and nullable columns arrive as `null`
- * rather than being omitted.
+ * Types for the carrier market API: an envelope of `event` (the last `Market`
+ * header, `carrier_markets`) and `commodities` (its items, `market_commodities`).
+ * Rows follow the same `to_jsonb` rules as the carrier types.
  */
 
-/** The header of the last `Market` event — a row of `carrier_markets`. */
 export interface MarketHeader {
 	carrier_id: number;
 	/** The raw `MarketID`; equal to `carrier_id` for a fleet carrier. */
@@ -27,7 +17,6 @@ export interface MarketHeader {
 	updated_at: string;
 }
 
-/** One commodity listed on the market — a row of `market_commodities`. */
 export interface Commodity {
 	carrier_id: number;
 	/** The journal's commodity id; unique within a market. */
@@ -52,7 +41,6 @@ export interface Commodity {
 	rare: boolean | null;
 }
 
-/** The `{ event, commodities }` payload sent on the stream and by the REST read. */
 export interface MarketSnapshot {
 	event: MarketHeader;
 	commodities: Commodity[];
