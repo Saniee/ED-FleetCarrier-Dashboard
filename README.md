@@ -68,13 +68,22 @@ The dashboard's `/admin` page does the same from the browser, plus **Settings** 
 Data schema and all information from the endpoints can be found in the source code.
 Mainly:
 - [journal_definitions.rs](backend/src/journal_definitions.rs) - Contains fully defined ED journal json schema, specific to Market Events and Carrier* events.
-- [carrier.ts](frontend/src/lib/types/carrier.ts) - Contains the full list of carrier table fields with theyre appropriate types.
+- [carrier.ts](frontend/src/lib/types/carrier.ts) - Contains the full list of carrier table fields with their appropriate types.
 - [market.ts](frontend/src/lib/types/market.ts) - Contains the definition of the Market event and the secondary commodities schema from Market.json
 
-## Multi-tenant Setup
-Heavily WIP on the [release/multiple-tenants](https://github.com/Saniee/ED-FleetCarrier-Dashboard/tree/release/multiple-tenants) branch.
-
-The database already supports multiple carriers, and the backend has endpoints for fetching via `carrier_id`, ~~however there are is no handling for~~:
+# Roadmap
+## Multi-tenant (done)
+Merged from [release/multiple-tenants](https://github.com/Saniee/ED-FleetCarrier-Dashboard/tree/release/multiple-tenants):
 - [x] User Registration / Login | Issue #1
     - [x] Per User Api Tokens
 - [x] Paginated list of Carriers in the database. | Issue #2
+- [x] Carrier visibility (public, link only, owner only) and squadron carriers
+- [x] Admin dashboard: accounts, carrier moderation, registration switch, audit log, traffic
+
+## Next
+- [ ] Discord webhooks per carrier: jumps, market orders, low tritium / balance
+- [ ] Hauling and colonisation operations: commodity targets, live progress, per-commander contributions
+- [ ] Owner finances and logistics: balance runway against upkeep, income over time, tritium for a planned route
+- [ ] Crew roles: share an owner-only carrier with other accounts (view, or manage orders)
+- [ ] Public discovery: find carriers by system, service or commodity
+- [ ] Easier plugin setup: pair the plugin with an account without copying a token
