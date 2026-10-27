@@ -115,7 +115,7 @@ export interface AdminStats {
 	tables: { name: string; rows: number; bytes: number }[];
 	ingest_daily: {
 		day: string;
-		kind: 'carrier' | 'market';
+		kind: 'carrier' | 'market' | 'hauling';
 		outcome: 'stored' | 'ignored' | 'refused';
 		count: number;
 	}[];

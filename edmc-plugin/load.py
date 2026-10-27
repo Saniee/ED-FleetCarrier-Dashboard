@@ -10,6 +10,7 @@ ed-commander - EDMC plugin that forwards Fleet Carrier data to an HTTP endpoint.
 
   * Carrier journal events -> POST <API URL>/api/carrier/event
   * The carrier's market   -> POST <API URL>/api/market/event
+  * Hauling (depots, deliveries) -> POST <API URL>/api/hauling/event
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ import myNotebook as nb  # type: ignore  # provided by EDMC
 
 from .edc import market, prefs, status
 from .edc.common import (CARRIER_EVENTS, EVENT_PATH, FLEET_CARRIER_STATION_TYPE,
+                         HAULING_EVENTS, HAULING_PATH,
                          ONLY_CARRIER_MARKETS, PLUGIN_NAME, __version__, logger)
 from .edc.prefs import PrefsPane
 from .edc.sender import Sender
@@ -73,6 +75,17 @@ def journal_entry(cmdr: str, is_beta: bool, system: str, station: str,
     event = entry.get("event")
     if event in CARRIER_EVENTS:
         sender.submit(EVENT_PATH, dict(entry))
+    elif event in HAULING_EVENTS:
+        # Sales only count on a carrier; skip them where EDMC knows we're
+        # docked elsewhere (the backend drops the rest).
+        station_type = state.get("StationType")
+        if event == "MarketSell" and station_type and station_type != FLEET_CARRIER_STATION_TYPE:
+            return
+        body = dict(entry)
+        # The journal leaves out where a depot is; say where we're docked.
+        body["_StarSystem"] = system
+        body["_StationName"] = station
+        sender.submit(HAULING_PATH, body)
     elif event == "Market":
         if ONLY_CARRIER_MARKETS and entry.get("StationType") != FLEET_CARRIER_STATION_TYPE:
             return

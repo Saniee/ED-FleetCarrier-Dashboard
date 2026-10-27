@@ -7,7 +7,7 @@ import os
 from config import appname  # type: ignore  # provided by EDMC
 
 PLUGIN_NAME = "ed-fleetcarriers-connector"
-__version__ = "1.2.1"
+__version__ = "1.3.0"
 
 # EDMC logs a plugin under "<appname>.<plugin folder>"; use the same name so our
 # lines are attributed to this plugin in EDMarketConnector.log.
@@ -25,6 +25,7 @@ CFG_ENABLED = "edcommander_enabled"
 DEFAULT_URL = "http://127.0.0.1:8080"
 EVENT_PATH = "/api/carrier/event"
 MARKET_PATH = "/api/market/event"
+HAULING_PATH = "/api/hauling/event"
 HEALTH_PATH = "/api/healthz"
 TOKEN_HEADER = "X-Ingest-Token"
 
@@ -35,6 +36,12 @@ CARRIER_EVENTS = frozenset({
     "CarrierCrewServices", "CarrierFinance", "CarrierShipPack",
     "CarrierModulePack", "CarrierTradeOrder", "CarrierDockingPermission",
     "CarrierNameChange", "CarrierLocation",
+})
+
+# Must match the backend's HaulingEvent enum: colonisation depots and what the
+# commander delivers, to a depot or a carrier, for hauling operations.
+HAULING_EVENTS = frozenset({
+    "ColonisationConstructionDepot", "ColonisationContribution", "MarketSell",
 })
 
 # The backend only tracks the carrier's own market and accepts-and-drops the

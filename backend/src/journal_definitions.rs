@@ -496,6 +496,109 @@ pub struct Commodity {
     pub rare: bool,
 }
 
+/// A commodity's key, as trade orders and operations use it: `steel` from the
+/// market's `$steel_name;`, `MarketSell`'s `steel` or a depot's `$Steel_name;`.
+pub fn commodity_key(symbol: &str) -> String {
+    symbol
+        .trim()
+        .trim_start_matches('$')
+        .trim_end_matches(';')
+        .trim_end_matches("_name")
+        .to_ascii_lowercase()
+}
+
+/// Events that count towards hauling operations (`POST /api/hauling/event`).
+/// The plugin adds `_StarSystem` / `_StationName` from where the commander is
+/// docked, since the journal leaves them out.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "event", rename_all = "PascalCase")]
+pub enum HaulingEvent {
+    ColonisationConstructionDepot(ConstructionDepot),
+    ColonisationContribution(ColonisationContribution),
+    MarketSell(MarketSell),
+}
+
+impl HaulingEvent {
+    pub fn timestamp(&self) -> &str {
+        match self {
+            Self::ColonisationConstructionDepot(e) => &e.timestamp,
+            Self::ColonisationContribution(e) => &e.timestamp,
+            Self::MarketSell(e) => &e.timestamp,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ConstructionDepot {
+    #[serde(rename = "timestamp")]
+    pub timestamp: String,
+    #[serde(rename = "MarketID")]
+    pub market_id: i64,
+    /// 0..1
+    pub construction_progress: f64,
+    #[serde(default)]
+    pub construction_complete: bool,
+    #[serde(default)]
+    pub construction_failed: bool,
+    #[serde(default)]
+    pub resources_required: Vec<DepotResource>,
+    #[serde(rename = "_StarSystem")]
+    pub star_system: Option<String>,
+    #[serde(rename = "_StationName")]
+    pub station_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DepotResource {
+    /// `$Steel_name;`
+    pub name: String,
+    #[serde(rename = "Name_Localised")]
+    pub name_localised: Option<String>,
+    pub required_amount: i64,
+    pub provided_amount: i64,
+    #[serde(default)]
+    pub payment: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ColonisationContribution {
+    #[serde(rename = "timestamp")]
+    pub timestamp: String,
+    #[serde(rename = "MarketID")]
+    pub market_id: i64,
+    pub contributions: Vec<Contribution>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct Contribution {
+    pub name: String,
+    #[serde(rename = "Name_Localised")]
+    pub name_localised: Option<String>,
+    pub amount: i64,
+}
+
+/// A sale on any market; only sales to a known carrier are kept.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct MarketSell {
+    #[serde(rename = "timestamp")]
+    pub timestamp: String,
+    #[serde(rename = "MarketID")]
+    pub market_id: i64,
+    /// `steel`
+    #[serde(rename = "Type")]
+    pub commodity: String,
+    #[serde(rename = "Type_Localised")]
+    pub commodity_localised: Option<String>,
+    pub count: i64,
+    #[serde(default)]
+    pub sell_price: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -65,6 +65,11 @@ Owners can give each carrier a Discord webhook (carrier settings on the **Accoun
 
 Notices come from what an event changed, so replays and the same event from several commanders are announced once, and events older than 30 minutes aren't announced at all. A webhook posts only while the account that set it up owns the carrier; if Discord reports it deleted, it switches off until saved again. Set `PUBLIC_ORIGIN` for the backend too (compose passes it) to link the carrier page from each message.
 
+### Hauling operations
+A carrier's owner can start **operations** from the carrier page: a named goal with commodity targets. A colonisation operation follows a construction depot and takes its targets from it, as the game reports them; otherwise the owner lists the commodities and tonnes. Anyone who can see the carrier can see its operations.
+
+Progress comes from the plugin (1.3.0 or later), which forwards `ColonisationConstructionDepot`, `ColonisationContribution` and `MarketSell` to `/api/hauling/event`, adding the system and station it is docked at. Depot reports are shared (the newest wins); deliveries need a user token and are credited to that account, counted once however often they are resent, and only sales to a tracked carrier are kept. An operation counts deliveries made after it started, and finishes itself when its depot reports construction complete or, without a depot, when the carrier has been sold everything listed; with the **Operation complete** webhook notice switched on, Discord hears about it.
+
 ### Tests
 `cargo test` in `backend/` includes tests that need Postgres: each creates and drops its own temporary database through `DATABASE_URL` (from `backend/.env`), so that role needs permission to create databases. With the compose database running, the default user has it.
 
@@ -87,7 +92,7 @@ Merged from [release/multiple-tenants](https://github.com/Saniee/ED-FleetCarrier
 
 ## Next
 - [ ] Discord webhooks per carrier: jumps, market orders, low tritium (draft on `feature/discord-webhooks`; balance alerts come with finances)
-- [ ] Hauling and colonisation operations: commodity targets, live progress, per-commander contributions
+- [ ] Hauling and colonisation operations: commodity targets, live progress, per-commander contributions (draft on `feature/hauling-ops`)
 - [ ] Owner finances and logistics: balance runway against upkeep, income over time, tritium for a planned route
 - [ ] Crew roles: share an owner-only carrier with other accounts (view, or manage orders)
 - [ ] Public discovery: find carriers by system, service or commodity

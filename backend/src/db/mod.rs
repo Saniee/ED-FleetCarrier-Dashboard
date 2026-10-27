@@ -8,6 +8,7 @@ pub mod admin;
 pub mod settings;
 pub mod stats;
 pub mod webhooks;
+pub mod operations;
 
 use sqlx::PgPool;
 

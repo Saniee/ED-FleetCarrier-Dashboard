@@ -484,6 +484,50 @@ body::before {
     margin-top: 2.5rem;
   }
 
+  /* ---------- hauling operations ---------- */
+
+  .carrier_operations,
+  .operation_section {
+    margin-top: 2.5rem;
+  }
+  .operation_section .num {
+    text-align: right;
+    font-family: var(--font-data);
+  }
+
+  .operations {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    li {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 0.3rem 1rem;
+      padding: 0.6rem 0;
+      border-bottom: 1px solid var(--color-primary-2);
+    }
+    .meter {
+      grid-column: 1;
+    }
+  }
+
+  /* A progress bar in the theme colour. */
+  .meter {
+    height: 0.5rem;
+    min-width: 6rem;
+    background: var(--color-primary-0);
+    border: 1px solid var(--color-primary-2);
+  }
+  .meter--wide {
+    margin: 0.5rem 0 0;
+  }
+  .meter__fill {
+    height: 100%;
+    background: var(--color-primary);
+    box-shadow: 0 0 0.5rem var(--color-primary-5);
+  }
+
   .market__meta {
     margin: 0 0 0.6rem;
     font-size: 0.85rem;

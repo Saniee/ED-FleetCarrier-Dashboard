@@ -8,7 +8,7 @@
    */
   let { callsign }: { callsign: string } = $props();
 
-  type WebhookEvent = 'jump' | 'arrival' | 'trade_order' | 'order_filled' | 'low_fuel';
+  type WebhookEvent = 'jump' | 'arrival' | 'trade_order' | 'order_filled' | 'low_fuel' | 'operation';
 
   interface Webhook {
     configured: boolean;
@@ -25,7 +25,8 @@
     { key: 'arrival', label: 'Arrived in a new system' },
     { key: 'trade_order', label: 'Trade order posted or cancelled' },
     { key: 'order_filled', label: 'Trade order filled' },
-    { key: 'low_fuel', label: 'Tritium running low' }
+    { key: 'low_fuel', label: 'Tritium running low' },
+    { key: 'operation', label: 'Hauling operation complete' }
   ];
 
   const path = $derived(`/api/carriers/${encodeURIComponent(callsign)}/webhook`);

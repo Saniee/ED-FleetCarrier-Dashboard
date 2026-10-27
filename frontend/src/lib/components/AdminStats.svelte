@@ -56,11 +56,12 @@
 
   const ingest = $derived.by((): Series[] => {
     const rows = stats?.ingest_daily ?? [];
-    const pick = (kind: string | null, outcome: string) =>
-      perDay(rows.filter((r) => r.outcome === outcome && (kind === null || r.kind === kind)));
+    const pick = (kinds: string[] | null, outcome: string) =>
+      perDay(rows.filter((r) => r.outcome === outcome && (kinds === null || kinds.includes(r.kind))));
     return [
-      { label: 'Carrier events stored', fill: 'full', values: pick('carrier', 'stored') },
-      { label: 'Markets stored', fill: 'mid', values: pick('market', 'stored') },
+      // Hauling events share a bar: the chart has four shades.
+      { label: 'Carrier & hauling events stored', fill: 'full', values: pick(['carrier', 'hauling'], 'stored') },
+      { label: 'Markets stored', fill: 'mid', values: pick(['market'], 'stored') },
       { label: 'Ignored', fill: 'low', values: pick(null, 'ignored') },
       { label: 'Refused', fill: 'text', values: pick(null, 'refused') }
     ];

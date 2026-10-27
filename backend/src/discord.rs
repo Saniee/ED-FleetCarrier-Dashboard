@@ -139,6 +139,7 @@ pub fn message(notice: &Notice, carrier: &Carrier) -> Value {
             format!("{level} t of tritium left (alert below {threshold} t)."),
             RED,
         ),
+        Notice::OperationComplete { name } => ("Operation complete", format!("**{name}** has everything it needs."), GREEN),
     };
 
     let name = carrier.name.unwrap_or("Fleet carrier");

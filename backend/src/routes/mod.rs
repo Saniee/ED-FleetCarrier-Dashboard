@@ -6,11 +6,14 @@ mod carriers;
 mod carrier_event;
 mod carrier_stream;
 mod market;
+mod operations;
 mod plugin;
 mod recent_events;
 mod webhooks;
 #[cfg(test)]
 mod webhooks_tests;
+#[cfg(test)]
+mod operations_tests;
 mod healthz;
 
 use std::{
@@ -110,7 +113,8 @@ pub fn router(app: AppState) -> Router {
 
     let ingest = Router::new()
         .route("/api/carrier/event", post(carrier_event::post))
-        .route("/api/market/event", post(market::post));
+        .route("/api/market/event", post(market::post))
+        .route("/api/hauling/event", post(operations::post_event));
 
     let general: Router<AppState> = Router::new()
         .route("/api/carriers", get(carriers::list))
@@ -126,6 +130,16 @@ pub fn router(app: AppState) -> Router {
         .route("/api/carriers/{callsign}/events", get(recent_events::get_events_by_callsign))
         .route("/api/carriers/{callsign}/market", get(market::get_by_callsign))
         .route("/api/carriers/{callsign}/stream", get(carrier_stream::stream_by_callsign))
+        .route(
+            "/api/carriers/{callsign}/operations",
+            get(operations::list).post(operations::create),
+        )
+        .route(
+            "/api/operations/{id}",
+            get(operations::get).patch(operations::update).delete(operations::delete),
+        )
+        .route("/api/depots", get(operations::depots))
+        .route("/api/commodities", get(operations::commodities))
         .route(
             "/api/carriers/{callsign}/webhook",
             get(webhooks::get).put(webhooks::put).delete(webhooks::delete),

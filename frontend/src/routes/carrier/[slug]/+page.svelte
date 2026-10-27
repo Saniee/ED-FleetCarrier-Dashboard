@@ -8,6 +8,7 @@
   import { goto } from '$app/navigation';
   import { auth } from '$lib/auth.svelte';
   import { carrierMassFor, isSquadronHull, fuelPerJump, jumpsLeft, MAX_JUMP_RANGE } from '$lib/carrier-fuel';
+  import OperationList from '$lib/components/OperationList.svelte';
   import { commodityName, commodityCategory, commodityPrice, commodityQuantity, isTraded } from '$lib/commodity';
 
   let { data }: { data: PageData } = $props();
@@ -159,6 +160,9 @@
     {/if}
   </div>
 
+  {#if feed.carrier?.callsign}
+    <OperationList callsign={feed.carrier.callsign} {owner} />
+  {/if}
   <div class="carrier_market">
     <div class="history__head">
       <h2>Commodities</h2>

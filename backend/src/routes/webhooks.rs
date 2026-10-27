@@ -203,6 +203,16 @@ pub fn market_changed(state: &AppState, watch: MarketWatch, carrier_id: i64, eve
     send(state, &watch.hook, carrier_id, &watch.carrier, notices);
 }
 
+/// Announce something that isn't tied to one event (an operation finishing).
+/// Best effort, like the rest.
+pub async fn announce(state: &AppState, carrier_id: i64, notice: Notice) {
+    let Some(hook) = webhooks::active(&state.db_pool, carrier_id).await.inspect_err(log).ok().flatten() else {
+        return;
+    };
+    let row = carriers::get(&state.db_pool, carrier_id).await.inspect_err(log).ok().flatten().unwrap_or(Value::Null);
+    send(state, &hook, carrier_id, &row, vec![notice]);
+}
+
 fn send(state: &AppState, hook: &webhooks::Active, carrier_id: i64, row: &Value, notices: Vec<Notice>) {
     let carrier = Carrier::from_row(row, state.public_origin.as_deref());
     for notice in notices.iter().filter(|n| hook.wants(n.event())) {

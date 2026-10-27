@@ -8,6 +8,7 @@ use sqlx::PgPool;
 pub enum Kind {
     Carrier,
     Market,
+    Hauling,
 }
 
 #[derive(Clone, Copy)]
@@ -23,6 +24,7 @@ pub async fn count(pool: &PgPool, user_id: i64, kind: Kind, outcome: Outcome) ->
     let kind = match kind {
         Kind::Carrier => "carrier",
         Kind::Market => "market",
+        Kind::Hauling => "hauling",
     };
     let outcome = match outcome {
         Outcome::Stored => "stored",

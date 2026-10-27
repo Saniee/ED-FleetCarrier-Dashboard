@@ -8,10 +8,10 @@
 use chrono::{DateTime, Duration, Utc};
 use serde_json::Value;
 
-use crate::journal_definitions::{CarrierEvent, Commodity};
+use crate::journal_definitions::{CarrierEvent, Commodity, commodity_key};
 
 /// The notice kinds an owner can switch on, as stored in `carrier_webhooks.events`.
-pub const EVENTS: [&str; 5] = ["jump", "arrival", "trade_order", "order_filled", "low_fuel"];
+pub const EVENTS: [&str; 6] = ["jump", "arrival", "trade_order", "order_filled", "low_fuel", "operation"];
 
 /// Events older than this are replays: they may still change the carrier, but
 /// announcing them would be news from the past.
@@ -32,6 +32,7 @@ pub enum Notice {
     OrderCancelled { commodity: String },
     OrderFilled { commodity: String, side: Side },
     LowFuel { level: i64, threshold: i64 },
+    OperationComplete { name: String },
 }
 
 impl Notice {
@@ -43,6 +44,7 @@ impl Notice {
             Notice::OrderPosted { .. } | Notice::OrderCancelled { .. } => "trade_order",
             Notice::OrderFilled { .. } => "order_filled",
             Notice::LowFuel { .. } => "low_fuel",
+            Notice::OperationComplete { .. } => "operation",
         }
     }
 }
@@ -126,15 +128,6 @@ pub fn carrier_notices(event: &CarrierEvent, before: &Value, after: &Value, low_
     }
 
     out
-}
-
-/// `iridium` from the market's `$iridium_name;`: the key trade orders use.
-fn commodity_key(symbol: &str) -> String {
-    symbol
-        .trim_start_matches('$')
-        .trim_end_matches(';')
-        .trim_end_matches("_name")
-        .to_ascii_lowercase()
 }
 
 /// Orders that ran out between two reads of a carrier's market: a buy order

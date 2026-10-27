@@ -11,6 +11,7 @@ mod cli;
 mod discord;
 mod edsm;
 mod error;
+mod hauling;
 mod notify;
 
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
