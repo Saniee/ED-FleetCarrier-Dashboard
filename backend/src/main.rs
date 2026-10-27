@@ -8,8 +8,10 @@ mod journal_definitions;
 mod app_state;
 mod auth;
 mod cli;
+mod discord;
 mod edsm;
 mod error;
+mod notify;
 
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -44,14 +46,17 @@ async fn main() {
     let pool = db::connect(&std::env::var("DATABASE_URL").expect("Missing db url!")).await;
     println!("Connected!");
 
+    let http = edsm::client();
     let state = app_state::AppState {
+        notify: discord::spawn(pool.clone(), http.clone()),
         db_pool: pool,
-        http: edsm::client(),
+        http,
         tx,
         legacy_token: std::env::var("TOKEN").ok().filter(|t| !t.trim().is_empty()),
         anon_ingest: env_flag("ALLOW_ANON_INGEST", false),
         registration_open: env_flag("ALLOW_REGISTRATION", true),
         rate_limit: env_flag("RATE_LIMIT", true),
+        public_origin: std::env::var("PUBLIC_ORIGIN").ok().filter(|o| !o.trim().is_empty()),
     };
 
     if state.anon_ingest {

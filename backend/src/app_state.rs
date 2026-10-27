@@ -4,7 +4,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use tokio::sync::broadcast;
 
-use crate::db::carriers::CarrierSnapshot;
+use crate::{db::carriers::CarrierSnapshot, discord};
 
 /// The `{ event, commodities }` envelope for a carrier's market, as published to
 /// subscribers and served by the REST read.
@@ -38,4 +38,8 @@ pub struct AppState {
     pub registration_open: bool,
     /// Per-IP request limits (`RATE_LIMIT`, on unless set to `0` / `false`).
     pub rate_limit: bool,
+    /// Outgoing Discord webhook messages (see `discord::spawn`).
+    pub notify: discord::Queue,
+    /// The site's public address (`PUBLIC_ORIGIN`), for links in notifications.
+    pub public_origin: Option<String>,
 }

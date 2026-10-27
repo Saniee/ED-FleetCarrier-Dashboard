@@ -29,6 +29,8 @@ services:
       TOKEN: ${TOKEN:-}
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-1}
       RATE_LIMIT: ${RATE_LIMIT:-1}
+      # Links the carrier page from Discord notifications.
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

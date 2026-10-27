@@ -59,6 +59,9 @@ async fn handle(state: &AppState, ingest: Ingest, payload: CarrierEvent) -> Inge
         ));
     }
 
+    // The carrier as it was, to see afterwards what the event changed.
+    let watch = super::webhooks::watch_carrier(state, payload.carrier_id(), &payload).await;
+
     // `carrier_events.carrier` is a foreign key onto `carriers`, so the carriers
     // row has to exist before the history row that references it is written.
     let carrier_id = carriers::apply(&state.db_pool, &payload)
@@ -119,6 +122,9 @@ async fn handle(state: &AppState, ingest: Ingest, payload: CarrierEvent) -> Inge
             .map_err(internal_msg)?;
 
         if let Some(snapshot) = carriers::get(&state.db_pool, id).await.map_err(internal_msg)? {
+            if let Some(watch) = watch {
+                super::webhooks::carrier_changed(state, watch, id, &payload, &snapshot);
+            }
             let _ = state.tx.send(Update::Carrier(id, snapshot));
         }
     }

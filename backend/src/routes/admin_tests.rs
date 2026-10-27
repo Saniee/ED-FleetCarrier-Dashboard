@@ -29,12 +29,14 @@ fn app(pool: &PgPool) -> Router {
         anon_ingest: false,
         registration_open: true,
         rate_limit: false,
+        notify: tokio::sync::mpsc::channel(1).0,
+        public_origin: None,
     })
 }
 
 /// A user with a live session; returns `(id, session token)`. The password hash
 /// is a placeholder: these tests never log in.
-async fn user(pool: &PgPool, name: &str, role: &str) -> (i64, String) {
+pub(super) async fn user(pool: &PgPool, name: &str, role: &str) -> (i64, String) {
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO users (username, password_hash, role) VALUES ($1, 'x', $2) RETURNING id",
     )
@@ -48,7 +50,7 @@ async fn user(pool: &PgPool, name: &str, role: &str) -> (i64, String) {
     (id, token)
 }
 
-async fn call(app: &Router, method: Method, uri: &str, token: Option<&str>, body: Option<Value>) -> (StatusCode, Value) {
+pub(super) async fn call(app: &Router, method: Method, uri: &str, token: Option<&str>, body: Option<Value>) -> (StatusCode, Value) {
     let mut req = Request::builder().method(method).uri(uri);
     if let Some(t) = token {
         req = req.header("authorization", format!("Bearer {t}"));
@@ -313,7 +315,7 @@ async fn audit_log_pages_newest_first_and_filters_by_account(pool: PgPool) {
     assert!(page["items"].as_array().unwrap().iter().all(|i| i["target_id"] == a));
 }
 
-async fn carrier(pool: &PgPool, id: i64, callsign: &str, owner: Option<i64>, visibility: &str) {
+pub(super) async fn carrier(pool: &PgPool, id: i64, callsign: &str, owner: Option<i64>, visibility: &str) {
     sqlx::query("INSERT INTO carriers (carrier_id, callsign, name, owner_id, visibility) VALUES ($1, $2, 'Test', $3, $4)")
         .bind(id)
         .bind(callsign)

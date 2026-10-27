@@ -83,6 +83,9 @@ async fn handle(state: &AppState, ingest: Ingest, payload: MarketEvent) -> Inges
         .await
         .map_err(internal_msg)?;
 
+    // The market as it was, to spot orders this read shows as filled.
+    let watch = super::webhooks::watch_market(state, carrier_id, &payload).await;
+
     // Header and commodity list are two halves of one snapshot: write them
     // together so a failure cannot leave them disagreeing.
     let mut tx = state.db_pool.begin().await.map_err(internal_msg)?;
@@ -91,6 +94,10 @@ async fn handle(state: &AppState, ingest: Ingest, payload: MarketEvent) -> Inges
         .await
         .map_err(internal_msg)?;
     tx.commit().await.map_err(internal_msg)?;
+
+    if let Some(watch) = watch {
+        super::webhooks::market_changed(state, watch, carrier_id, &payload);
+    }
 
     if let Some(snapshot) = snapshot(&state.db_pool, carrier_id).await.map_err(internal_msg)? {
         let _ = state.tx.send(Update::Market(carrier_id, snapshot));

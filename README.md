@@ -60,6 +60,11 @@ Carriers are moderated under `/api/admin/carriers`: list every carrier whatever 
 
 The dashboard's `/admin` page does the same from the browser, plus **Settings** (`/api/admin/settings`: open or close registration, or go back to `ALLOW_REGISTRATION`) and the **Audit log** (`/api/admin/audit?page=&user=`), newest first and filterable by account.
 
+### Discord notifications
+Owners can give each carrier a Discord webhook (carrier settings on the **Account** page) and pick what it posts: jumps scheduled or cancelled, arrivals, trade orders posted or cancelled, orders filled (seen on the next market read), and tritium dropping below a threshold. Only `discord.com` webhook URLs are accepted, the URL is never shown back in full, and it is stored apart from the carrier row so viewers of the carrier never see it.
+
+Notices come from what an event changed, so replays and the same event from several commanders are announced once, and events older than 30 minutes aren't announced at all. A webhook posts only while the account that set it up owns the carrier; if Discord reports it deleted, it switches off until saved again. Set `PUBLIC_ORIGIN` for the backend too (compose passes it) to link the carrier page from each message.
+
 ### Tests
 `cargo test` in `backend/` includes tests that need Postgres: each creates and drops its own temporary database through `DATABASE_URL` (from `backend/.env`), so that role needs permission to create databases. With the compose database running, the default user has it.
 
@@ -81,7 +86,7 @@ Merged from [release/multiple-tenants](https://github.com/Saniee/ED-FleetCarrier
 - [x] Admin dashboard: accounts, carrier moderation, registration switch, audit log, traffic
 
 ## Next
-- [ ] Discord webhooks per carrier: jumps, market orders, low tritium / balance
+- [ ] Discord webhooks per carrier: jumps, market orders, low tritium (draft on `feature/discord-webhooks`; balance alerts come with finances)
 - [ ] Hauling and colonisation operations: commodity targets, live progress, per-commander contributions
 - [ ] Owner finances and logistics: balance runway against upkeep, income over time, tritium for a planned route
 - [ ] Crew roles: share an owner-only carrier with other accounts (view, or manage orders)

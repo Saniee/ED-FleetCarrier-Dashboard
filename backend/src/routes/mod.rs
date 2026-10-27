@@ -8,6 +8,9 @@ mod carrier_stream;
 mod market;
 mod plugin;
 mod recent_events;
+mod webhooks;
+#[cfg(test)]
+mod webhooks_tests;
 mod healthz;
 
 use std::{
@@ -93,13 +96,17 @@ fn limited<S: Clone + Send + Sync + 'static>(
 
 pub fn router(app: AppState) -> Router {
     // Each group has its own bucket per IP. Login/register (and token
-    // regeneration) run argon2 and are the brute-force target, so they are tightest; ingest can burst (journal
+    // regeneration) run argon2 and are the brute-force target, so they are tightest (with the
+    // webhook test, which posts to Discord); ingest can burst (journal
     // replays); the health check stays unlimited.
     let credentials = Router::new()
         .route("/api/auth/register", post(auth::register))
         .route("/api/auth/login", post(auth::login))
         // Checks the password too, so it shares the brute-force bucket.
-        .route("/api/auth/tokens/{id}/regenerate", post(auth::regenerate_token));
+        .route("/api/auth/tokens/{id}/regenerate", post(auth::regenerate_token))
+        // Posts to Discord on the owner's behalf; kept slow so it can't be
+        // used to flood a channel.
+        .route("/api/carriers/{callsign}/webhook/test", post(webhooks::test));
 
     let ingest = Router::new()
         .route("/api/carrier/event", post(carrier_event::post))
@@ -119,6 +126,10 @@ pub fn router(app: AppState) -> Router {
         .route("/api/carriers/{callsign}/events", get(recent_events::get_events_by_callsign))
         .route("/api/carriers/{callsign}/market", get(market::get_by_callsign))
         .route("/api/carriers/{callsign}/stream", get(carrier_stream::stream_by_callsign))
+        .route(
+            "/api/carriers/{callsign}/webhook",
+            get(webhooks::get).put(webhooks::put).delete(webhooks::delete),
+        )
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/plugin", get(plugin::info))
         .route("/api/plugin/download", get(plugin::download))

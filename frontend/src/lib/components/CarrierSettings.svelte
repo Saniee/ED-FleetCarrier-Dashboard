@@ -3,6 +3,7 @@
   import type { CarrierListItem } from '$lib/types/carrier';
   import { isSquadronHull } from '$lib/carrier-fuel';
   import { VISIBILITIES, VISIBILITY_LABEL, type Visibility } from '$lib/visibility';
+  import WebhookSettings from './WebhookSettings.svelte';
 
   /**
    * Owner settings for one carrier, as a modal. Changes save as they are made;
@@ -107,6 +108,10 @@
         </span>
       </label>
     </fieldset>
+
+    {#if carrier.callsign}
+      <WebhookSettings callsign={carrier.callsign} />
+    {/if}
 
     <fieldset class="modal__group modal__group--danger" disabled={busy}>
       <legend>Ownership</legend>
