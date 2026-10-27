@@ -91,7 +91,7 @@
     {#if feed.carrier}
       <header class="carrier_header">
         <h1>
-        {feed.carrier.name ?? 'unknown carrier'}
+        {feed.carrier.name ?? 'unnamed carrier'}
         <span class="callsign">{feed.carrier.callsign ?? '—'}</span>
         {#if feed.carrier.is_squadron || isSquadronHull(feed.carrier.carrier_type)}<span class="tag">Squadron</span>{/if}
       </h1>

@@ -121,7 +121,7 @@
       {#if error}<p class="error">{error}</p>{:else}<p class="muted">Loading…</p>{/if}
     {:else}
       <header class="modal__head">
-        <h3>{carrier.name ?? 'unknown carrier'}</h3>
+        <h3>{carrier.name ?? 'unnamed carrier'}</h3>
         <span class="modal__sub">{carrier.callsign ?? '—'} · #{carrier.carrier_id}</span>
         {#if carrier.moderation_hidden_at}<span class="tag tag--alert">Hidden</span>{/if}
       </header>
